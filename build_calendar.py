@@ -58,14 +58,14 @@ def parse_vk_date(text):
     }
 
     # Detect year from text (e.g., "2025", "2026")
-    year_match = re.search(r"(20\d{2})", text)
+    year_match = re.search(r"\b(20\d{2})\b", text)
     if year_match:
         year = int(year_match.group(1))
     else:
         year = 2026  # Default year
 
     # Pattern: 11-12 июля 2026, 25-26 июля
-    pattern = r"(\d{1,2})[-–—]\s*(\d{1,2})\s+([а-я]+)"
+    pattern = r"(\d{1,2})[-\u2013\u2014]\s*(\d{1,2})\s+([\u0430-\u044f]+)"
     match = re.search(pattern, text.lower())
     if match:
         day1 = int(match.group(1))
@@ -78,7 +78,7 @@ def parse_vk_date(text):
             return date_start, date_end, True
 
     # Single date: "11 июля 2026", "11 июля"
-    pattern_single = r"(\d{1,2})\s+([а-я]+)"
+    pattern_single = r"(\d{1,2})\s+([\u0430-\u044f]+)"
     match = re.search(pattern_single, text.lower())
     if match:
         day = int(match.group(1))
