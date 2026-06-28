@@ -317,12 +317,11 @@ def generate_months_html(festivals):
 def build_calendar():
     festivals = SAMPLE_FESTIVALS
     Path('public').mkdir(exist_ok=True)
-    html = HTML_TEMPLATE.format(
-        city=CITY,
-        filter_buttons=generate_filter_buttons(festivals),
-        months_content=generate_months_html(festivals),
-        update_time=datetime.now().strftime('%d %B %Y, %H:%M')
-    )
+    html = HTML_TEMPLATE
+    html = html.replace('{city}', CITY)
+    html = html.replace('{filter_buttons}', generate_filter_buttons(festivals))
+    html = html.replace('{months_content}', generate_months_html(festivals))
+    html = html.replace('{update_time}', datetime.now().strftime('%d %B %Y, %H:%M'))
     with open(HTML_OUTPUT, 'w', encoding='utf-8') as f:
         f.write(html)
     with open(CSV_OUTPUT, 'w', newline='', encoding='utf-8') as f:
