@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang='ru'>
+<head>
+    <meta charset='UTF-8'>
+    <meta name='viewport' content='width=device-width, initial-scale=1.0'>
+    <title>Календарь фестивалей - Санкт-Петербург</title>
+    <style>
+        :root { --bg: #0f0f23; --surface: #1a1a2e; --surface-light: #16213e;
+                --text: #e0e0e0; --text-muted: #888; --accent: #e94560;
+                --accent-secondary: #0f3460; --border: #2a2a4a;
+                --success: #4caf50; --warning: #ff9800; }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Segoe UI', system-ui, sans-serif;
+               background: var(--bg); color: var(--text); line-height: 1.6; }
+        .container { max-width: 1200px; margin: 0 auto; padding: 2rem; }
+        header { text-align: center; padding: 3rem 0;
+                 border-bottom: 2px solid var(--accent); margin-bottom: 2rem; }
+        h1 { font-size: 2.5rem; background: linear-gradient(135deg, var(--accent), #ff6b6b);
+             -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+        .subtitle { color: var(--text-muted); font-size: 1.1rem; }
+        .filters { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 2rem;
+                  padding: 1rem; background: var(--surface); border-radius: 12px; }
+        .filter-btn { padding: 0.5rem 1rem; border: 1px solid var(--border);
+                     background: var(--surface-light); color: var(--text);
+                     border-radius: 20px; cursor: pointer; transition: all 0.3s; }
+        .filter-btn:hover, .filter-btn.active { background: var(--accent); color: white; }
+        .months-grid { display: grid; gap: 2rem; }
+        .month-section { background: var(--surface); border-radius: 16px;
+                         padding: 1.5rem; border: 1px solid var(--border); }
+        .month-title { font-size: 1.5rem; color: var(--accent); margin-bottom: 1rem; }
+        .festival-card { background: var(--surface-light); border-radius: 12px;
+                        padding: 1.25rem; margin-bottom: 1rem;
+                        border-left: 4px solid var(--accent); transition: all 0.2s; }
+        .festival-card:hover { transform: translateX(5px);
+                              box-shadow: 0 4px 20px rgba(233, 69, 96, 0.15); }
+        .festival-card.tentative { border-left-color: var(--warning); opacity: 0.85; }
+        .festival-header { display: flex; justify-content: space-between;
+                          align-items: flex-start; flex-wrap: wrap; gap: 0.5rem; }
+        .festival-name { font-size: 1.2rem; font-weight: 600; color: #fff; }
+        .festival-date { background: var(--accent-secondary); padding: 0.25rem 0.75rem;
+                        border-radius: 20px; font-size: 0.85rem; color: #fff; }
+        .festival-date.tentative { background: var(--warning); color: #000; }
+        .festival-venue { color: var(--text-muted); font-size: 0.9rem; margin: 0.5rem 0; }
+        .festival-description { color: var(--text-muted); font-size: 0.95rem; margin-bottom: 0.75rem; }
+        .themes { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-bottom: 1rem; }
+        .theme-tag { background: rgba(233, 69, 96, 0.15); color: var(--accent);
+                    padding: 0.2rem 0.6rem; border-radius: 12px; font-size: 0.8rem; }
+        .actions { display: flex; gap: 0.75rem; flex-wrap: wrap; }
+        .btn { padding: 0.5rem 1rem; border-radius: 8px; text-decoration: none;
+               font-size: 0.9rem; transition: all 0.2s; display: inline-flex; gap: 0.4rem; }
+        .btn-primary { background: var(--accent); color: white; }
+        .btn-primary:hover { background: #ff6b6b; }
+        .btn-secondary { background: var(--surface); color: var(--text); border: 1px solid var(--border); }
+        .status-badge { display: inline-block; padding: 0.2rem 0.5rem; border-radius: 4px;
+                       font-size: 0.75rem; margin-left: 0.5rem; }
+        .status-confirmed { background: rgba(76, 175, 80, 0.2); color: var(--success); }
+        .status-tentative { background: rgba(255, 152, 0, 0.2); color: var(--warning); }
+        footer { text-align: center; padding: 2rem; color: var(--text-muted);
+                 border-top: 1px solid var(--border); margin-top: 2rem; }
+        @media (max-width: 768px) { .container { padding: 1rem; } h1 { font-size: 1.8rem; } }
+    </style>
+</head>
+<body>
+    <div class='container'>
+        <header>
+            <h1>Календарь фестивалей</h1>
+            <p class='subtitle'>Санкт-Петербург • Гик-культура, аниме, ролевые игры, фэнтези, технологии</p>
+        </header>
+        <div class='filters'>
+            <button class='filter-btn active' onclick="filterThemes('all')">Все</button>
+            <button class='filter-btn' onclick="filterThemes('НРИ')">НРИ</button>
+<button class='filter-btn' onclick="filterThemes('аниме')">аниме</button>
+<button class='filter-btn' onclick="filterThemes('комиксы')">комиксы</button>
+<button class='filter-btn' onclick="filterThemes('компьютерные игры')">компьютерные игры</button>
+<button class='filter-btn' onclick="filterThemes('косплей')">косплей</button>
+<button class='filter-btn' onclick="filterThemes('настольные игры')">настольные игры</button>
+<button class='filter-btn' onclick="filterThemes('ролевые игры')">ролевые игры</button>
+<button class='filter-btn' onclick="filterThemes('сериалы')">сериалы</button>
+<button class='filter-btn' onclick="filterThemes('субкультуры')">субкультуры</button>
+<button class='filter-btn' onclick="filterThemes('фантастика')">фантастика</button>
+<button class='filter-btn' onclick="filterThemes('фэнтези')">фэнтези</button>
+<button class='filter-btn' onclick="filterThemes('японская культура')">японская культура</button>
+        </div>
+        <div class='months-grid'>
+            <div class='month-section'>
+                <h2 class='month-title'>2026-05</h2>
+                
+        <div class='festival-card ' data-themes='аниме,японская культура,субкультуры'>
+            <div class='festival-header'>
+                <span class='festival-name'>Япония.Фест
+                    <span class='status-badge status-confirmed'>подтверждено</span>
+                </span>
+                <span class='festival-date '>22 мая -- 6 сентября</span>
+            </div>
+            <div class='festival-venue'>Санкт-Петербург</div>
+            <div class='festival-description'>Долгосрочная выставочная программа японской культуры.</div>
+            <div class='themes'><span class='theme-tag'>аниме</span><span class='theme-tag'>японская культура</span><span class='theme-tag'>субкультуры</span></div>
+            <div class='actions'>
+                <a href='https://vk.com/japanfestspb' class='btn btn-secondary' target='_blank'>Подробнее</a>
+                <a href='https://www.google.com/calendar/render?action=TEMPLATE&text=%D0%AF%D0%BF%D0%BE%D0%BD%D0%B8%D1%8F.%D0%A4%D0%B5%D1%81%D1%82&dates=20260522%2F20260907&details=%D0%94%D0%BE%D0%BB%D0%B3%D0%BE%D1%81%D1%80%D0%BE%D1%87%D0%BD%D0%B0%D1%8F%20%D0%B2%D1%8B%D1%81%D1%82%D0%B0%D0%B2%D0%BE%D1%87%D0%BD%D0%B0%D1%8F%20%D0%BF%D1%80%D0%BE%D0%B3%D1%80%D0%B0%D0%BC%D0%BC%D0%B0%20%D1%8F%D0%BF%D0%BE%D0%BD%D1%81%D0%BA%D0%BE%D0%B9%20%D0%BA%D1%83%D0%BB%D1%8C%D1%82%D1%83%D1%80%D1%8B.%0A%0A%D0%98%D1%81%D1%82%D0%BE%D1%87%D0%BD%D0%B8%D0%BA%3A%20https%3A%2F%2Fvk.com%2Fjapanfestspb&location=%D0%A1%D0%B0%D0%BD%D0%BA%D1%82-%D0%9F%D0%B5%D1%82%D0%B5%D1%80%D0%B1%D1%83%D1%80%D0%B3%2C%20%D0%A1%D0%B0%D0%BD%D0%BA%D1%82-%D0%9F%D0%B5%D1%82%D0%B5%D1%80%D0%B1%D1%83%D1%80%D0%B3&sf=true&output=xml' class='btn btn-primary' target='_blank'>В Google Calendar</a>
+            </div>
+        </div>
+    
+            </div>
+        
+
+            <div class='month-section'>
+                <h2 class='month-title'>Июль 2026</h2>
+                
+        <div class='festival-card ' data-themes='фантастика,комиксы,косплей,сериалы,компьютерные игры'>
+            <div class='festival-header'>
+                <span class='festival-name'>Epic Con
+                    <span class='status-badge status-confirmed'>подтверждено</span>
+                </span>
+                <span class='festival-date '>11--12 июля</span>
+            </div>
+            <div class='festival-venue'>DAA EXPO</div>
+            <div class='festival-description'>Крупнейший фестиваль поп-культуры. Конкурс косплея, выставочные стенды, Аллея Авторов, настольные и консольные игры, квесты.</div>
+            <div class='themes'><span class='theme-tag'>фантастика</span><span class='theme-tag'>комиксы</span><span class='theme-tag'>косплей</span><span class='theme-tag'>сериалы</span><span class='theme-tag'>компьютерные игры</span></div>
+            <div class='actions'>
+                <a href='https://epiccon.ru/' class='btn btn-secondary' target='_blank'>Подробнее</a>
+                <a href='https://www.google.com/calendar/render?action=TEMPLATE&text=Epic%20Con&dates=20260711%2F20260713&details=%D0%9A%D1%80%D1%83%D0%BF%D0%BD%D0%B5%D0%B9%D1%88%D0%B8%D0%B9%20%D1%84%D0%B5%D1%81%D1%82%D0%B8%D0%B2%D0%B0%D0%BB%D1%8C%20%D0%BF%D0%BE%D0%BF-%D0%BA%D1%83%D0%BB%D1%8C%D1%82%D1%83%D1%80%D1%8B.%20%D0%9A%D0%BE%D0%BD%D0%BA%D1%83%D1%80%D1%81%20%D0%BA%D0%BE%D1%81%D0%BF%D0%BB%D0%B5%D1%8F%2C%20%D0%B2%D1%8B%D1%81%D1%82%D0%B0%D0%B2%D0%BE%D1%87%D0%BD%D1%8B%D0%B5%20%D1%81%D1%82%D0%B5%D0%BD%D0%B4%D1%8B%2C%20%D0%90%D0%BB%D0%BB%D0%B5%D1%8F%20%D0%90%D0%B2%D1%82%D0%BE%D1%80%D0%BE%D0%B2%2C%20%D0%BD%D0%B0%D1%81%D1%82%D0%BE%D0%BB%D1%8C%D0%BD%D1%8B%D0%B5%20%D0%B8%20%D0%BA%D0%BE%D0%BD%D1%81%D0%BE%D0%BB%D1%8C%D0%BD%D1%8B%D0%B5%20%D0%B8%D0%B3%D1%80%D1%8B%2C%20%D0%BA%D0%B2%D0%B5%D1%81%D1%82%D1%8B.%0A%0A%D0%98%D1%81%D1%82%D0%BE%D1%87%D0%BD%D0%B8%D0%BA%3A%20https%3A%2F%2Fepiccon.ru%2F&location=DAA%20EXPO%2C%20%D0%A1%D0%B0%D0%BD%D0%BA%D1%82-%D0%9F%D0%B5%D1%82%D0%B5%D1%80%D0%B1%D1%83%D1%80%D0%B3&sf=true&output=xml' class='btn btn-primary' target='_blank'>В Google Calendar</a>
+            </div>
+        </div>
+    
+
+        <div class='festival-card ' data-themes='аниме,косплей,японская культура'>
+            <div class='festival-header'>
+                <span class='festival-name'>АниКон
+                    <span class='status-badge status-confirmed'>подтверждено</span>
+                </span>
+                <span class='festival-date '>17--19 июля</span>
+            </div>
+            <div class='festival-venue'>Санкт-Петербург</div>
+            <div class='festival-description'>Аниме-фестиваль с сильной сценической программой и косплей-дефиле.</div>
+            <div class='themes'><span class='theme-tag'>аниме</span><span class='theme-tag'>косплей</span><span class='theme-tag'>японская культура</span></div>
+            <div class='actions'>
+                <a href='https://vk.com/aniconspb' class='btn btn-secondary' target='_blank'>Подробнее</a>
+                <a href='https://www.google.com/calendar/render?action=TEMPLATE&text=%D0%90%D0%BD%D0%B8%D0%9A%D0%BE%D0%BD&dates=20260717%2F20260720&details=%D0%90%D0%BD%D0%B8%D0%BC%D0%B5-%D1%84%D0%B5%D1%81%D1%82%D0%B8%D0%B2%D0%B0%D0%BB%D1%8C%20%D1%81%20%D1%81%D0%B8%D0%BB%D1%8C%D0%BD%D0%BE%D0%B9%20%D1%81%D1%86%D0%B5%D0%BD%D0%B8%D1%87%D0%B5%D1%81%D0%BA%D0%BE%D0%B9%20%D0%BF%D1%80%D0%BE%D0%B3%D1%80%D0%B0%D0%BC%D0%BC%D0%BE%D0%B9%20%D0%B8%20%D0%BA%D0%BE%D1%81%D0%BF%D0%BB%D0%B5%D0%B9-%D0%B4%D0%B5%D1%84%D0%B8%D0%BB%D0%B5.%0A%0A%D0%98%D1%81%D1%82%D0%BE%D1%87%D0%BD%D0%B8%D0%BA%3A%20https%3A%2F%2Fvk.com%2Faniconspb&location=%D0%A1%D0%B0%D0%BD%D0%BA%D1%82-%D0%9F%D0%B5%D1%82%D0%B5%D1%80%D0%B1%D1%83%D1%80%D0%B3%2C%20%D0%A1%D0%B0%D0%BD%D0%BA%D1%82-%D0%9F%D0%B5%D1%82%D0%B5%D1%80%D0%B1%D1%83%D1%80%D0%B3&sf=true&output=xml' class='btn btn-primary' target='_blank'>В Google Calendar</a>
+            </div>
+        </div>
+    
+
+        <div class='festival-card ' data-themes='ролевые игры,настольные игры,НРИ'>
+            <div class='festival-header'>
+                <span class='festival-name'>DiceFest IV
+                    <span class='status-badge status-confirmed'>подтверждено</span>
+                </span>
+                <span class='festival-date '>25--26 июля</span>
+            </div>
+            <div class='festival-venue'>Санкт-Петербург</div>
+            <div class='festival-description'>Фестиваль настольных ролевых игр. Игротеки, мастер-классы, новые знакомства.</div>
+            <div class='themes'><span class='theme-tag'>ролевые игры</span><span class='theme-tag'>настольные игры</span><span class='theme-tag'>НРИ</span></div>
+            <div class='actions'>
+                <a href='https://taplink.cc/rurpgfest' class='btn btn-secondary' target='_blank'>Подробнее</a>
+                <a href='https://www.google.com/calendar/render?action=TEMPLATE&text=DiceFest%20IV&dates=20260725%2F20260727&details=%D0%A4%D0%B5%D1%81%D1%82%D0%B8%D0%B2%D0%B0%D0%BB%D1%8C%20%D0%BD%D0%B0%D1%81%D1%82%D0%BE%D0%BB%D1%8C%D0%BD%D1%8B%D1%85%20%D1%80%D0%BE%D0%BB%D0%B5%D0%B2%D1%8B%D1%85%20%D0%B8%D0%B3%D1%80.%20%D0%98%D0%B3%D1%80%D0%BE%D1%82%D0%B5%D0%BA%D0%B8%2C%20%D0%BC%D0%B0%D1%81%D1%82%D0%B5%D1%80-%D0%BA%D0%BB%D0%B0%D1%81%D1%81%D1%8B%2C%20%D0%BD%D0%BE%D0%B2%D1%8B%D0%B5%20%D0%B7%D0%BD%D0%B0%D0%BA%D0%BE%D0%BC%D1%81%D1%82%D0%B2%D0%B0.%0A%0A%D0%98%D1%81%D1%82%D0%BE%D1%87%D0%BD%D0%B8%D0%BA%3A%20https%3A%2F%2Ftaplink.cc%2Frurpgfest&location=%D0%A1%D0%B0%D0%BD%D0%BA%D1%82-%D0%9F%D0%B5%D1%82%D0%B5%D1%80%D0%B1%D1%83%D1%80%D0%B3%2C%20%D0%A1%D0%B0%D0%BD%D0%BA%D1%82-%D0%9F%D0%B5%D1%82%D0%B5%D1%80%D0%B1%D1%83%D1%80%D0%B3&sf=true&output=xml' class='btn btn-primary' target='_blank'>В Google Calendar</a>
+            </div>
+        </div>
+    
+            </div>
+        
+
+            <div class='month-section'>
+                <h2 class='month-title'>Август 2026</h2>
+                
+        <div class='festival-card ' data-themes='ролевые игры,фэнтези,НРИ'>
+            <div class='festival-header'>
+                <span class='festival-name'>ДАНЖН ФЕСТ
+                    <span class='status-badge status-confirmed'>подтверждено</span>
+                </span>
+                <span class='festival-date '>1--2 августа</span>
+            </div>
+            <div class='festival-venue'>Санкт-Петербург</div>
+            <div class='festival-description'>Фестиваль настольных ролевых игр в жанре dungeon crawl.</div>
+            <div class='themes'><span class='theme-tag'>ролевые игры</span><span class='theme-tag'>фэнтези</span><span class='theme-tag'>НРИ</span></div>
+            <div class='actions'>
+                <a href='https://taplink.cc/rurpgfest' class='btn btn-secondary' target='_blank'>Подробнее</a>
+                <a href='https://www.google.com/calendar/render?action=TEMPLATE&text=%D0%94%D0%90%D0%9D%D0%96%D0%9D%20%D0%A4%D0%95%D0%A1%D0%A2&dates=20260801%2F20260803&details=%D0%A4%D0%B5%D1%81%D1%82%D0%B8%D0%B2%D0%B0%D0%BB%D1%8C%20%D0%BD%D0%B0%D1%81%D1%82%D0%BE%D0%BB%D1%8C%D0%BD%D1%8B%D1%85%20%D1%80%D0%BE%D0%BB%D0%B5%D0%B2%D1%8B%D1%85%20%D0%B8%D0%B3%D1%80%20%D0%B2%20%D0%B6%D0%B0%D0%BD%D1%80%D0%B5%20dungeon%20crawl.%0A%0A%D0%98%D1%81%D1%82%D0%BE%D1%87%D0%BD%D0%B8%D0%BA%3A%20https%3A%2F%2Ftaplink.cc%2Frurpgfest&location=%D0%A1%D0%B0%D0%BD%D0%BA%D1%82-%D0%9F%D0%B5%D1%82%D0%B5%D1%80%D0%B1%D1%83%D1%80%D0%B3%2C%20%D0%A1%D0%B0%D0%BD%D0%BA%D1%82-%D0%9F%D0%B5%D1%82%D0%B5%D1%80%D0%B1%D1%83%D1%80%D0%B3&sf=true&output=xml' class='btn btn-primary' target='_blank'>В Google Calendar</a>
+            </div>
+        </div>
+    
+            </div>
+        
+
+            <div class='month-section'>
+                <h2 class='month-title'>Сентябрь 2026</h2>
+                
+        <div class='festival-card tentative' data-themes='аниме,японская культура,косплей'>
+            <div class='festival-header'>
+                <span class='festival-name'>ToshoCon
+                    <span class='status-badge status-tentative'>дата уточняется</span>
+                </span>
+                <span class='festival-date tentative'>15--17 сентября</span>
+            </div>
+            <div class='festival-venue'>Санкт-Петербург</div>
+            <div class='festival-description'>Крупный аниме-фестиваль с упором на японскую культуру. Точные даты уточняются.</div>
+            <div class='themes'><span class='theme-tag'>аниме</span><span class='theme-tag'>японская культура</span><span class='theme-tag'>косплей</span></div>
+            <div class='actions'>
+                <a href='https://vk.com/toshocon' class='btn btn-secondary' target='_blank'>Подробнее</a>
+                <a href='https://www.google.com/calendar/render?action=TEMPLATE&text=ToshoCon&dates=20260915%2F20260918&details=%D0%9A%D1%80%D1%83%D0%BF%D0%BD%D1%8B%D0%B9%20%D0%B0%D0%BD%D0%B8%D0%BC%D0%B5-%D1%84%D0%B5%D1%81%D1%82%D0%B8%D0%B2%D0%B0%D0%BB%D1%8C%20%D1%81%20%D1%83%D0%BF%D0%BE%D1%80%D0%BE%D0%BC%20%D0%BD%D0%B0%20%D1%8F%D0%BF%D0%BE%D0%BD%D1%81%D0%BA%D1%83%D1%8E%20%D0%BA%D1%83%D0%BB%D1%8C%D1%82%D1%83%D1%80%D1%83.%20%D0%A2%D0%BE%D1%87%D0%BD%D1%8B%D0%B5%20%D0%B4%D0%B0%D1%82%D1%8B%20%D1%83%D1%82%D0%BE%D1%87%D0%BD%D1%8F%D1%8E%D1%82%D1%81%D1%8F.%0A%0A%D0%98%D1%81%D1%82%D0%BE%D1%87%D0%BD%D0%B8%D0%BA%3A%20https%3A%2F%2Fvk.com%2Ftoshocon&location=%D0%A1%D0%B0%D0%BD%D0%BA%D1%82-%D0%9F%D0%B5%D1%82%D0%B5%D1%80%D0%B1%D1%83%D1%80%D0%B3%2C%20%D0%A1%D0%B0%D0%BD%D0%BA%D1%82-%D0%9F%D0%B5%D1%82%D0%B5%D1%80%D0%B1%D1%83%D1%80%D0%B3&sf=true&output=xml' class='btn btn-primary' target='_blank'>В Google Calendar</a>
+            </div>
+        </div>
+    
+            </div>
+        </div>
+        <footer>
+            <p>Обновлено: 28 June 2026, 17:08</p>
+            <p>Источники: Epic Con, Ролевой Маяк, AnimeScene, VK Fest</p>
+        </footer>
+    </div>
+    <script>
+        function filterThemes(theme) {
+            const cards = document.querySelectorAll('.festival-card');
+            const buttons = document.querySelectorAll('.filter-btn');
+            buttons.forEach(btn => btn.classList.remove('active'));
+            event.target.classList.add('active');
+            cards.forEach(card => {
+                if (theme === 'all' || card.dataset.themes.includes(theme))
+                    card.style.display = 'block';
+                else
+                    card.style.display = 'none';
+            });
+        }
+    </script>
+</body>
+</html>
