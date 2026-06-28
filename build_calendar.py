@@ -57,6 +57,14 @@ def parse_vk_date(text):
         "июля": 7, "августа": 8, "сентября": 9, "октября": 10, "ноября": 11, "декабря": 12
     }
 
+    # Detect year from text (e.g., "2025", "2026")
+    year_match = re.search(r"(20\d{2})", text)
+    if year_match:
+        year = int(year_match.group(1))
+    else:
+        year = 2026  # Default year
+
+    # Pattern: 11-12 июля 2026, 25-26 июля
     pattern = r"(\d{1,2})[-–—]\s*(\d{1,2})\s+([а-я]+)"
     match = re.search(pattern, text.lower())
     if match:
@@ -65,11 +73,11 @@ def parse_vk_date(text):
         month_name = match.group(3)
         month = months_ru.get(month_name)
         if month:
-            year = 2026
             date_start = f"{year:04d}-{month:02d}-{day1:02d}"
             date_end = f"{year:04d}-{month:02d}-{day2:02d}"
             return date_start, date_end, True
 
+    # Single date: "11 июля 2026", "11 июля"
     pattern_single = r"(\d{1,2})\s+([а-я]+)"
     match = re.search(pattern_single, text.lower())
     if match:
@@ -77,7 +85,6 @@ def parse_vk_date(text):
         month_name = match.group(2)
         month = months_ru.get(month_name)
         if month:
-            year = 2026
             date = f"{year:04d}-{month:02d}-{day:02d}"
             return date, None, True
 
@@ -99,7 +106,7 @@ def extract_description(text, max_length=200):
         return desc
     return ""
 
-def fetch_vk_posts(token, group_id, count=10):
+def fetch_vk_posts(token, group_id, count=20):
     try:
         resp = requests.get(
             f"{VK_API_URL}/wall.get",
