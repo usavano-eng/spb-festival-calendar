@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Generated: 2026-07-01 03:22:18
+# Generated: 2026-06-30 22:45:02 MSK
 # Festival Calendar Builder for St. Petersburg
 # Automated scraper + HTML generator for geek/anime/roleplay festivals
 
@@ -7,12 +7,15 @@ import json
 import csv
 import os
 import re
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import quote
 from string import Template
 
 import requests
+
+# Timezone for all timestamps
+MSK = timezone(timedelta(hours=3))
 
 VK_GROUPS = [
     {"screen_name": "epiccon", "default_themes": ["фантастика", "комиксы", "косплей", "сериалы", "компьютерные игры"]},
@@ -56,11 +59,11 @@ def parse_vk_date(text):
     # Check for explicit year in text
     year_match = re.search(r"\b(20\d{2})\b", text)
     explicit_year = year_match is not None
-    year = int(year_match.group(1)) if year_match else datetime.now().year
+    year = int(year_match.group(1)) if year_match else datetime.now(MSK).year
 
     text_lower = text.lower()
 
-    # Pattern 1: Range with dash/en-dash/em-dash: "11-12 июля", "11–12 июля", "11—12 июля"
+    # Pattern 1: Range with dash/en-dash/em-dash: "11-12 июля"
     pattern_range = r"(\d{1,2})[-\u2013\u2014]\s*(\d{1,2})\s+([\u0430-\u044f]+)"
     match = re.search(pattern_range, text_lower)
     if match:
@@ -69,7 +72,7 @@ def parse_vk_date(text):
         if month:
             return f"{year:04d}-{month:02d}-{day1:02d}", f"{year:04d}-{month:02d}-{day2:02d}", True, explicit_year
 
-    # Pattern 2: Range with "и": "11 и 12 июля", "11 и 12 июля"
+    # Pattern 2: Range with "и": "11 и 12 июля"
     pattern_and = r"(\d{1,2})\s+и\s+(\d{1,2})\s+([\u0430-\u044f]+)"
     match = re.search(pattern_and, text_lower)
     if match:
@@ -100,7 +103,6 @@ def extract_description(text, max_length=400):
     """Extract first meaningful line as description."""
     lines = [line.strip() for line in text.split("\n") if line.strip()]
     if lines:
-        # Skip the title line if it looks like a date announcement
         for line in lines[1:] if len(lines) > 1 else lines:
             if len(line) > 20:
                 desc = line
@@ -132,22 +134,20 @@ def parse_vk_group(token, group_info):
         return []
     posts = fetch_vk_posts(token, group_id)
     festivals = []
-    today = datetime.now().date()
-    max_future = today + timedelta(days=550)  # ~1.5 years ahead
+    today = datetime.now(MSK).date()
+    max_future = today + timedelta(days=550)
 
     for post in posts:
         text = post.get("text", "")
         if not text:
             continue
 
-        # Get post publication date (Unix timestamp from VK API)
         post_date_ts = post.get("date")
         post_date = datetime.fromtimestamp(post_date_ts).date() if post_date_ts else today
         post_age_days = (today - post_date).days
 
         lines = [l.strip() for l in text.split("\n") if l.strip()]
         name = lines[0] if lines else f"Event from {screen_name}"
-        # Do NOT truncate name - show full title
 
         date_start, date_end, is_confirmed, explicit_year = parse_vk_date(text)
         if not date_start:
@@ -163,41 +163,36 @@ def parse_vk_group(token, group_info):
             print(f"  Skipping past event: {name} ({date_start})")
             continue
 
-        # CHECK 2: Skip events too far in the future (> 1.5 years)
+        # CHECK 2: Skip events too far in the future
         if event_date > max_future:
             print(f"  Skipping too-far-future event: {name} ({date_start})")
             continue
 
-        # CHECK 3: If post is older than 90 days AND no explicit year in text,
-        # likely a repost of old event with implicit year assumption
+        # CHECK 3: Old post without explicit year
         if post_age_days > 90 and not explicit_year:
-            print(f"  Skipping old post without explicit year: {name} (post from {post_date}, event {date_start})")
+            print(f"  Skipping old post without explicit year: {name}")
             continue
 
-        # CHECK 4: If year not explicit and post is from previous years but event claims this year
+        # CHECK 4: Suspicious cross-year post
         if not explicit_year and post_date.year < today.year and event_date.year == today.year:
-            print(f"  Skipping suspicious cross-year post: {name} (post {post_date.year}, event {date_start})")
+            print(f"  Skipping suspicious cross-year post: {name}")
             continue
 
-        # CHECK 5: Skip promotional/announcement posts that are not main event announcements
+        # CHECK 5: Skip promotional posts
         promo_keywords = [
             "повышение цен", "подорожание", "скидка", "акция", "распродажа",
             "купить билет", "заявки", "прием заявок", "конкурс", "отбор",
             "последний день", "успейте", "поторопитесь", "один месяц",
-            "представляем партнера", "официальный партнер"
+            "представляем партнера", "официальный партнер", "дорогие друзья"
         ]
-        # If post is clearly promotional and NOT the main event announcement, skip it
-        # Main event announcements usually have the event name + dates prominently
         is_promo = any(kw in text.lower() for kw in promo_keywords)
-        has_event_name_in_title = any(kw in name.lower() for kw in ["фестивал", "con", "фест"])
 
-        if is_promo and not has_event_name_in_title:
+        # Count how many dates are in the text - promo posts usually mention only one date
+        date_mentions = len(re.findall(r"\d{1,2}\s+[\u0430-\u044f]+", text.lower()))
+
+        # Skip if clearly promotional: has promo keywords AND is short OR has only one date mention
+        if is_promo and (len(text) < 200 or date_mentions < 2):
             print(f"  Skipping promotional post: {name[:60]}...")
-            continue
-
-        # Additional: skip if text is mostly about tickets/prices/contests, not the event itself
-        if is_promo and len(text) < 150:
-            print(f"  Skipping short promotional post: {name[:60]}...")
             continue
 
         venue = extract_venue(text)
@@ -205,8 +200,6 @@ def parse_vk_group(token, group_info):
         post_id = post.get("id")
         source_url = f"https://vk.com/{screen_name}?w=wall-{group_id}_{post_id}"
 
-        # is_confirmed: True only if explicit year found OR date range (2+ days)
-        # Single-day dates without explicit year are marked as tentative
         is_confirmed = explicit_year or (date_end is not None)
 
         festivals.append(Festival(
@@ -218,23 +211,20 @@ def parse_vk_group(token, group_info):
 
 def normalize_event_name(name):
     """Extract core event name for deduplication."""
-    # Remove VK markup [club123|Name]
     cleaned = re.sub(r"\[club\d+\|[^\]]+\]", "", name)
     cleaned = re.sub(r"[^\w\s]", " ", cleaned)
     cleaned = re.sub(r"\s+", " ", cleaned).strip().lower()
-    # Look for known event name patterns
     event_patterns = ["epic con", "anicon", "dicefest", "данжн", "toshocon", "japan fest", "япония фест"]
     for pattern in event_patterns:
         if pattern in cleaned:
             return pattern
-    # Fallback: return first 3 significant words
     words = cleaned.split()
-    significant = [w for w in words if len(w) > 3 and w not in 
+    significant = [w for w in words if len(w) > 3 and w not in
                    ["фестиваль", "событие", "мероприятие", "санкт", "петербург", "проведет", "пройдет"]]
     return " ".join(significant[:3]) if significant else cleaned[:30]
 
 def deduplicate_festivals(festivals):
-    """Deduplicate festivals by normalized name + date. Keep the one with longest description."""
+    """Deduplicate by normalized name + date. Keep longest description."""
     groups = {}
     for f in festivals:
         key = (normalize_event_name(f.name), f.date_start, f.date_end)
@@ -244,7 +234,6 @@ def deduplicate_festivals(festivals):
 
     result = []
     for key, group in groups.items():
-        # Keep the festival with the longest description (most informative)
         best = max(group, key=lambda x: len(x.description))
         result.append(best)
 
@@ -261,10 +250,9 @@ def scrape_vk_festivals():
         all_festivals.extend(festivals)
         print(f"  Found {len(festivals)} events")
 
-    # Deduplicate by normalized name + date
     unique = deduplicate_festivals(all_festivals)
     print(f"Total after deduplication: {len(unique)} (was {len(all_festivals)})")
-    return unique, datetime.now().strftime("%d %B %Y, %H:%M")
+    return unique, datetime.now(MSK).strftime("%d %B %Y, %H:%M")
 
 CITY = "Санкт-Петербург"
 DATA_FILE = "festivals_data.json"
@@ -549,7 +537,7 @@ def build_calendar():
         last_update=last_vk_update,
         filter_buttons=generate_filter_buttons(festivals),
         months_content=generate_months_html(festivals),
-        update_time=datetime.now().strftime("%d %B %Y, %H:%M")
+        update_time=datetime.now(MSK).strftime("%d %B %Y, %H:%M")
     )
     with open(HTML_OUTPUT, "w", encoding="utf-8") as f:
         f.write(html)
