@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """
 Festival Calendar Builder for St. Petersburg
-Automated scraper + HTML generator for geek/anime/roleplay festivals
 """
 
 import json
@@ -11,14 +10,10 @@ import re
 from datetime import datetime, timedelta
 from pathlib import Path
 from urllib.parse import quote
+from string import Template
 
-# ============================================================
-# VK API PARSER
-# ============================================================
 import requests
 
-# List of VK groups to parse (screen names)
-# ADD MORE GROUPS HERE - just add a new dict to the list
 VK_GROUPS = [
     {"screen_name": "epiccon", "default_themes": ["фантастика", "комиксы", "косплей", "сериалы", "компьютерные игры"]},
     {"screen_name": "aniconspb", "default_themes": ["аниме", "косплей", "японская культура"]},
@@ -56,35 +51,22 @@ def parse_vk_date(text):
         "января": 1, "февраля": 2, "марта": 3, "апреля": 4, "мая": 5, "июня": 6,
         "июля": 7, "августа": 8, "сентября": 9, "октября": 10, "ноября": 11, "декабря": 12
     }
-
     year_match = re.search(r"\b(20\d{2})\b", text)
-    if year_match:
-        year = int(year_match.group(1))
-    else:
-        year = 2026
-
+    year = int(year_match.group(1)) if year_match else 2026
     pattern = r"(\d{1,2})[-\u2013\u2014]\s*(\d{1,2})\s+([\u0430-\u044f]+)"
     match = re.search(pattern, text.lower())
     if match:
-        day1 = int(match.group(1))
-        day2 = int(match.group(2))
-        month_name = match.group(3)
+        day1, day2, month_name = int(match.group(1)), int(match.group(2)), match.group(3)
         month = months_ru.get(month_name)
         if month:
-            date_start = f"{year:04d}-{month:02d}-{day1:02d}"
-            date_end = f"{year:04d}-{month:02d}-{day2:02d}"
-            return date_start, date_end, True
-
+            return f"{year:04d}-{month:02d}-{day1:02d}", f"{year:04d}-{month:02d}-{day2:02d}", True
     pattern_single = r"(\d{1,2})\s+([\u0430-\u044f]+)"
     match = re.search(pattern_single, text.lower())
     if match:
-        day = int(match.group(1))
-        month_name = match.group(2)
+        day, month_name = int(match.group(1)), match.group(2)
         month = months_ru.get(month_name)
         if month:
-            date = f"{year:04d}-{month:02d}-{day:02d}"
-            return date, None, True
-
+            return f"{year:04d}-{month:02d}-{day:02d}", None, True
     return None, None, False
 
 def extract_venue(text):
@@ -95,62 +77,45 @@ def extract_venue(text):
     return "Санкт-Петербург"
 
 def extract_description(text, max_length=200):
-    lines = [line.strip() for line in text.split('\n') if line.strip()]
+    lines = [line.strip() for line in text.split("\n") if line.strip()]
     if lines:
         desc = lines[0]
-        if len(desc) > max_length:
-            desc = desc[:max_length] + "..."
-        return desc
+        return desc[:max_length] + "..." if len(desc) > max_length else desc
     return ""
 
 def fetch_vk_posts(token, group_id, count=20):
     try:
         resp = requests.get(
             f"{VK_API_URL}/wall.get",
-            params={
-                "owner_id": f"-{group_id}",
-                "count": count,
-                "access_token": token,
-                "v": VK_API_VERSION
-            },
+            params={"owner_id": f"-{group_id}", "count": count, "access_token": token, "v": VK_API_VERSION},
             timeout=10
         )
         data = resp.json()
-        if "response" in data:
-            return data["response"]["items"]
-        return []
+        return data["response"]["items"] if "response" in data else []
     except Exception as e:
         print(f"Error fetching posts for group {group_id}: {e}")
         return []
 
 def parse_vk_group(token, group_info):
-    screen_name = group_info['screen_name']
-    default_themes = group_info['default_themes']
-
+    screen_name = group_info["screen_name"]
+    default_themes = group_info["default_themes"]
     group_id = resolve_screen_name(token, screen_name)
     if not group_id:
         print(f"Could not resolve group: {screen_name}")
         return []
-
     posts = fetch_vk_posts(token, group_id)
     festivals = []
     today = datetime.now().date()
-
     for post in posts:
-        text = post.get('text', '')
+        text = post.get("text", "")
         if not text:
             continue
-
-        lines = [l.strip() for l in text.split('\n') if l.strip()]
+        lines = [l.strip() for l in text.split("\n") if l.strip()]
         name = lines[0] if lines else f"Event from {screen_name}"
-        if len(name) > 80:
-            name = name[:80] + '...'
-
+        name = name[:80] + "..." if len(name) > 80 else name
         date_start, date_end, is_confirmed = parse_vk_date(text)
         if not date_start:
             continue
-
-        # FILTER: Skip past events
         try:
             event_date = datetime.strptime(date_start, "%Y-%m-%d").date()
             if event_date < today:
@@ -158,40 +123,27 @@ def parse_vk_group(token, group_info):
                 continue
         except:
             continue
-
         venue = extract_venue(text)
         description = extract_description(text)
-
-        post_id = post.get('id')
+        post_id = post.get("id")
         source_url = f"https://vk.com/{screen_name}?w=wall-{group_id}_{post_id}"
-
-        festival = Festival(
-            name=name,
-            date_start=date_start,
-            date_end=date_end,
-            venue=venue,
-            city=CITY,
-            themes=default_themes.copy(),
-            description=description,
-            source_url=source_url,
-            is_confirmed=is_confirmed
-        )
-        festivals.append(festival)
-
+        festivals.append(Festival(
+            name=name, date_start=date_start, date_end=date_end, venue=venue,
+            city=CITY, themes=default_themes.copy(), description=description,
+            source_url=source_url, is_confirmed=is_confirmed
+        ))
     return festivals
 
 def scrape_vk_festivals():
     token = get_vk_token()
     if not token:
         return []
-
     all_festivals = []
     for group_info in VK_GROUPS:
         print(f"Parsing VK group: {group_info['screen_name']}")
         festivals = parse_vk_group(token, group_info)
         all_festivals.extend(festivals)
         print(f"  Found {len(festivals)} events")
-
     seen = set()
     unique = []
     for f in all_festivals:
@@ -199,21 +151,14 @@ def scrape_vk_festivals():
         if key not in seen:
             seen.add(key)
             unique.append(f)
-
     print(f"Total unique VK festivals: {len(unique)}")
     return unique
 
-# ============================================================
-# CONFIGURATION
-# ============================================================
-CITY = 'Санкт-Петербург'
-DATA_FILE = 'festivals_data.json'
-HTML_OUTPUT = 'public/index.html'
-CSV_OUTPUT = 'public/festivals.csv'
+CITY = "Санкт-Петербург"
+DATA_FILE = "festivals_data.json"
+HTML_OUTPUT = "public/index.html"
+CSV_OUTPUT = "public/festivals.csv"
 
-# ============================================================
-# DATA STRUCTURE
-# ============================================================
 class Festival:
     def __init__(self, name, date_start, date_end, venue, city,
                  themes, description, source_url, ticket_url=None,
@@ -232,122 +177,66 @@ class Festival:
 
     def to_dict(self):
         return {
-            'name': self.name,
-            'date_start': self.date_start,
-            'date_end': self.date_end,
-            'venue': self.venue,
-            'city': self.city,
-            'themes': self.themes,
-            'description': self.description,
-            'source_url': self.source_url,
-            'ticket_url': self.ticket_url,
-            'image_url': self.image_url,
-            'is_confirmed': self.is_confirmed
+            "name": self.name, "date_start": self.date_start, "date_end": self.date_end,
+            "venue": self.venue, "city": self.city, "themes": self.themes,
+            "description": self.description, "source_url": self.source_url,
+            "ticket_url": self.ticket_url, "image_url": self.image_url,
+            "is_confirmed": self.is_confirmed
         }
 
     @classmethod
     def from_dict(cls, d):
         return cls(**d)
 
-# ============================================================
-# SAMPLE DATA (fallback when VK_TOKEN is not set or VK fails)
-# ============================================================
 SAMPLE_FESTIVALS = [
-    Festival(
-        name='Epic Con',
-        date_start='2026-07-11',
-        date_end='2026-07-12',
-        venue='DAA EXPO',
-        city='Санкт-Петербург',
-        themes=['фантастика', 'комиксы', 'косплей', 'сериалы', 'компьютерные игры'],
-        description='Крупнейший фестиваль поп-культуры. Конкурс косплея, выставочные стенды, Аллея Авторов, настольные и консольные игры, квесты.',
-        source_url='https://epiccon.ru/',
-        ticket_url='https://epiccon.ru/',
-        is_confirmed=True
-    ),
-    Festival(
-        name='АниКон',
-        date_start='2026-07-17',
-        date_end='2026-07-19',
-        venue='Санкт-Петербург',
-        city='Санкт-Петербург',
-        themes=['аниме', 'косплей', 'японская культура'],
-        description='Аниме-фестиваль с сильной сценической программой и косплей-дефиле.',
-        source_url='https://vk.com/aniconspb',
-        is_confirmed=True
-    ),
-    Festival(
-        name='DiceFest IV',
-        date_start='2026-07-25',
-        date_end='2026-07-26',
-        venue='Санкт-Петербург',
-        city='Санкт-Петербург',
-        themes=['ролевые игры', 'настольные игры', 'НРИ'],
-        description='Фестиваль настольных ролевых игр. Игротеки, мастер-классы, новые знакомства.',
-        source_url='https://taplink.cc/rurpgfest',
-        is_confirmed=True
-    ),
-    Festival(
-        name='ДАНЖН ФЕСТ',
-        date_start='2026-08-01',
-        date_end='2026-08-02',
-        venue='Санкт-Петербург',
-        city='Санкт-Петербург',
-        themes=['ролевые игры', 'фэнтези', 'НРИ'],
-        description='Фестиваль настольных ролевых игр в жанре dungeon crawl.',
-        source_url='https://taplink.cc/rurpgfest',
-        is_confirmed=True
-    ),
-    Festival(
-        name='Япония.Фест',
-        date_start='2026-05-22',
-        date_end='2026-09-06',
-        venue='Санкт-Петербург',
-        city='Санкт-Петербург',
-        themes=['аниме', 'японская культура', 'субкультуры'],
-        description='Долгосрочная выставочная программа японской культуры.',
-        source_url='https://vk.com/japanfestspb',
-        is_confirmed=True
-    ),
-    Festival(
-        name='ToshoCon',
-        date_start='2026-09-15',
-        date_end='2026-09-17',
-        venue='Санкт-Петербург',
-        city='Санкт-Петербург',
-        themes=['аниме', 'японская культура', 'косплей'],
-        description='Крупный аниме-фестиваль с упором на японскую культуру. Точные даты уточняются.',
-        source_url='https://vk.com/toshocon',
-        is_confirmed=False
-    ),
+    Festival(name="Epic Con", date_start="2026-07-11", date_end="2026-07-12", venue="DAA EXPO",
+             city="Санкт-Петербург", themes=["фантастика", "комиксы", "косплей", "сериалы", "компьютерные игры"],
+             description="Крупнейший фестиваль поп-культуры. Конкурс косплея, выставочные стенды, Аллея Авторов, настольные и консольные игры, квесты.",
+             source_url="https://epiccon.ru/", ticket_url="https://epiccon.ru/", is_confirmed=True),
+    Festival(name="АниКон", date_start="2026-07-17", date_end="2026-07-19", venue="Санкт-Петербург",
+             city="Санкт-Петербург", themes=["аниме", "косплей", "японская культура"],
+             description="Аниме-фестиваль с сильной сценической программой и косплей-дефиле.",
+             source_url="https://vk.com/aniconspb", is_confirmed=True),
+    Festival(name="DiceFest IV", date_start="2026-07-25", date_end="2026-07-26", venue="Санкт-Петербург",
+             city="Санкт-Петербург", themes=["ролевые игры", "настольные игры", "НРИ"],
+             description="Фестиваль настольных ролевых игр. Игротеки, мастер-классы, новые знакомства.",
+             source_url="https://taplink.cc/rurpgfest", is_confirmed=True),
+    Festival(name="ДАНЖН ФЕСТ", date_start="2026-08-01", date_end="2026-08-02", venue="Санкт-Петербург",
+             city="Санкт-Петербург", themes=["ролевые игры", "фэнтези", "НРИ"],
+             description="Фестиваль настольных ролевых игр в жанре dungeon crawl.",
+             source_url="https://taplink.cc/rurpgfest", is_confirmed=True),
+    Festival(name="Япония.Фест", date_start="2026-05-22", date_end="2026-09-06", venue="Санкт-Петербург",
+             city="Санкт-Петербург", themes=["аниме", "японская культура", "субкультуры"],
+             description="Долгосрочная выставочная программа японской культуры.",
+             source_url="https://vk.com/japanfestspb", is_confirmed=True),
+    Festival(name="ToshoCon", date_start="2026-09-15", date_end="2026-09-17", venue="Санкт-Петербург",
+             city="Санкт-Петербург", themes=["аниме", "японская культура", "косплей"],
+             description="Крупный аниме-фестиваль с упором на японскую культуру. Точные даты уточняются.",
+             source_url="https://vk.com/toshocon", is_confirmed=False),
 ]
 
 def generate_google_calendar_link(festival):
-    base_url = 'https://www.google.com/calendar/render'
-    start = festival.date_start.replace('-', '')
+    base_url = "https://www.google.com/calendar/render"
+    start = festival.date_start.replace("-", "")
     if festival.date_end:
-        end_dt = datetime.strptime(festival.date_end, '%Y-%m-%d') + timedelta(days=1)
-        end = end_dt.strftime('%Y%m%d')
+        end_dt = datetime.strptime(festival.date_end, "%Y-%m-%d") + timedelta(days=1)
+        end = end_dt.strftime("%Y%m%d")
     else:
         end = start
     params = {
-        'action': 'TEMPLATE',
-        'text': festival.name,
-        'dates': f'{start}/{end}',
-        'details': f'{festival.description}\n\nИсточник: {festival.source_url}',
-        'location': f'{festival.venue}, {festival.city}',
-        'sf': 'true',
-        'output': 'xml'
+        "action": "TEMPLATE", "text": festival.name, "dates": f"{start}/{end}",
+        "details": f"{festival.description}\n\nИсточник: {festival.source_url}",
+        "location": f"{festival.venue}, {festival.city}", "sf": "true", "output": "xml"
     }
-    query = '&'.join([f"{quote(k, safe='')}={quote(str(v), safe='')}" for k, v in params.items()])
-    return f'{base_url}?{query}'
+    query = "&".join([f"{quote(k, safe='')}={quote(str(v), safe='')}" for k, v in params.items()])
+    return f"{base_url}?{query}"
 
-HTML_TEMPLATE = '''<!DOCTYPE html>
-<html lang='ru'>
+HTML_TEMPLATE = Template("""<!DOCTYPE html>
+<html lang="ru">
 <head>
-    <meta charset='UTF-8'>
-    <meta name='viewport' content='width=device-width, initial-scale=1.0'>
-    <title>Календарь фестивалей - {city}</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Календарь фестивалей - $city</title>
     <style>
         :root { --bg: #0f0f23; --surface: #1a1a2e; --surface-light: #16213e;
                 --text: #e0e0e0; --text-muted: #888; --accent: #e94560;
@@ -405,18 +294,18 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     </style>
 </head>
 <body>
-    <div class='container'>
+    <div class="container">
         <header>
             <h1>Календарь фестивалей</h1>
-            <p class='subtitle'>{city} • Гик-культура, аниме, ролевые игры, фэнтези, технологии</p>
+            <p class="subtitle">$city &bull; Гик-культура, аниме, ролевые игры, фэнтези, технологии</p>
         </header>
-        <div class='filters'>
-            <button class='filter-btn active' onclick="filterThemes('all')">Все</button>
-            {filter_buttons}
+        <div class="filters">
+            <button class="filter-btn active" onclick="filterThemes('all')">Все</button>
+            $filter_buttons
         </div>
-        <div class='months-grid'>{months_content}</div>
+        <div class="months-grid">$months_content</div>
         <footer>
-            <p>Обновлено: {update_time}</p>
+            <p>Обновлено: $update_time</p>
             <p>Источники: Epic Con, Ролевой Маяк, AnimeScene, VK Fest</p>
         </footer>
     </div>
@@ -435,7 +324,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }
     </script>
 </body>
-</html>'''
+</html>""")
+
 
 def generate_filter_buttons(festivals):
     all_themes = set()
@@ -443,49 +333,49 @@ def generate_filter_buttons(festivals):
         all_themes.update(f.themes)
     buttons = []
     for theme in sorted(all_themes):
-        buttons.append(f"<button class='filter-btn' onclick=\"filterThemes('{theme}')\">{theme}</button>")
-    return '\n'.join(buttons)
+        buttons.append(f"<button class=\"filter-btn\" onclick=\"filterThemes('{theme}')\">{theme}</button>")
+    return "\n".join(buttons)
 
 def format_date_range(date_start, date_end):
-    start_dt = datetime.strptime(date_start, '%Y-%m-%d')
+    start_dt = datetime.strptime(date_start, "%Y-%m-%d")
     if date_end and date_end != date_start:
-        end_dt = datetime.strptime(date_end, '%Y-%m-%d')
+        end_dt = datetime.strptime(date_end, "%Y-%m-%d")
         if start_dt.month == end_dt.month:
-            return f'{start_dt.day}--{end_dt.day} {get_month_name(start_dt.month)}'
+            return f"{start_dt.day}--{end_dt.day} {get_month_name(start_dt.month)}"
         else:
-            return f'{start_dt.day} {get_month_name(start_dt.month)} -- {end_dt.day} {get_month_name(end_dt.month)}'
-    return f'{start_dt.day} {get_month_name(start_dt.month)}'
+            return f"{start_dt.day} {get_month_name(start_dt.month)} -- {end_dt.day} {get_month_name(end_dt.month)}"
+    return f"{start_dt.day} {get_month_name(start_dt.month)}"
 
 def get_month_name(month_num):
-    months = ['', 'января', 'февраля', 'марта', 'апреля', 'мая', 'июня',
-              'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря']
+    months = ["", "января", "февраля", "марта", "апреля", "мая", "июня",
+              "июля", "августа", "сентября", "октября", "ноября", "декабря"]
     return months[month_num]
 
 def generate_festival_card(festival):
     date_str = format_date_range(festival.date_start, festival.date_end)
-    tentative_class = 'tentative' if not festival.is_confirmed else ''
-    status_class = 'status-tentative' if not festival.is_confirmed else 'status-confirmed'
-    status_text = 'дата уточняется' if not festival.is_confirmed else 'подтверждено'
-    themes_html = ''.join([f"<span class='theme-tag'>{t}</span>" for t in festival.themes])
-    themes_data = ','.join(festival.themes)
+    tentative_class = "tentative" if not festival.is_confirmed else ""
+    status_class = "status-tentative" if not festival.is_confirmed else "status-confirmed"
+    status_text = "дата уточняется" if not festival.is_confirmed else "подтверждено"
+    themes_html = "".join([f"<span class=\"theme-tag\">{t}</span>" for t in festival.themes])
+    themes_data = ",".join(festival.themes)
     calendar_link = generate_google_calendar_link(festival)
-    return f'''
-        <div class='festival-card {tentative_class}' data-themes='{themes_data}'>
-            <div class='festival-header'>
-                <span class='festival-name'>{festival.name}
-                    <span class='status-badge {status_class}'>{status_text}</span>
+    return f"""
+        <div class="festival-card {tentative_class}" data-themes="{themes_data}">
+            <div class="festival-header">
+                <span class="festival-name">{festival.name}
+                    <span class="status-badge {status_class}">{status_text}</span>
                 </span>
-                <span class='festival-date {tentative_class}'>{date_str}</span>
+                <span class="festival-date {tentative_class}">{date_str}</span>
             </div>
-            <div class='festival-venue'>{festival.venue}</div>
-            <div class='festival-description'>{festival.description}</div>
-            <div class='themes'>{themes_html}</div>
-            <div class='actions'>
-                <a href='{festival.source_url}' class='btn btn-secondary' target='_blank'>Подробнее</a>
-                <a href='{calendar_link}' class='btn btn-primary' target='_blank'>В Google Calendar</a>
+            <div class="festival-venue">{festival.venue}</div>
+            <div class="festival-description">{festival.description}</div>
+            <div class="themes">{themes_html}</div>
+            <div class="actions">
+                <a href="{festival.source_url}" class="btn btn-secondary" target="_blank">Подробнее</a>
+                <a href="{calendar_link}" class="btn btn-primary" target="_blank">В Google Calendar</a>
             </div>
         </div>
-    '''
+    """
 
 def group_by_month(festivals):
     months = {}
@@ -501,31 +391,29 @@ def group_by_month(festivals):
 def generate_months_html(festivals):
     months = group_by_month(festivals)
     month_names = {
-        '2026-01': 'Январь 2026', '2026-02': 'Февраль 2026', '2026-03': 'Март 2026',
-        '2026-04': 'Апрель 2026', '2026-05': 'Май 2026', '2026-06': 'Июнь 2026',
-        '2026-07': 'Июль 2026', '2026-08': 'Август 2026', '2026-09': 'Сентябрь 2026',
-        '2026-10': 'Октябрь 2026', '2026-11': 'Ноябрь 2026', '2026-12': 'Декабрь 2026',
-        '2027-01': 'Январь 2027', '2027-02': 'Февраль 2027', '2027-03': 'Март 2027',
-        '2027-04': 'Апрель 2027', '2027-05': 'Май 2027', '2027-06': 'Июнь 2027',
-        '2027-07': 'Июль 2027', '2027-08': 'Август 2027', '2027-09': 'Сентябрь 2027',
-        '2027-10': 'Октябрь 2027', '2027-11': 'Ноябрь 2027', '2027-12': 'Декабрь 2027',
+        "2026-01": "Январь 2026", "2026-02": "Февраль 2026", "2026-03": "Март 2026",
+        "2026-04": "Апрель 2026", "2026-05": "Май 2026", "2026-06": "Июнь 2026",
+        "2026-07": "Июль 2026", "2026-08": "Август 2026", "2026-09": "Сентябрь 2026",
+        "2026-10": "Октябрь 2026", "2026-11": "Ноябрь 2026", "2026-12": "Декабрь 2026",
+        "2027-01": "Январь 2027", "2027-02": "Февраль 2027", "2027-03": "Март 2027",
+        "2027-04": "Апрель 2027", "2027-05": "Май 2027", "2027-06": "Июнь 2027",
+        "2027-07": "Июль 2027", "2027-08": "Август 2027", "2027-09": "Сентябрь 2027",
+        "2027-10": "Октябрь 2027", "2027-11": "Ноябрь 2027", "2027-12": "Декабрь 2027",
     }
     sections = []
     for month_key, fest_list in months.items():
-        cards = '\n'.join([generate_festival_card(f) for f in fest_list])
+        cards = "\n".join([generate_festival_card(f) for f in fest_list])
         month_name = month_names.get(month_key, month_key)
-        sections.append(f'''
-            <div class='month-section'>
-                <h2 class='month-title'>{month_name}</h2>
+        sections.append(f"""
+            <div class="month-section">
+                <h2 class="month-title">{month_name}</h2>
                 {cards}
             </div>
-        ''')
-    return '\n'.join(sections)
+        """)
+    return "\n".join(sections)
 
 def build_calendar():
-    # Try to fetch from VK API first
     vk_festivals = scrape_vk_festivals()
-
     if vk_festivals:
         festivals = vk_festivals
         print(f"Using {len(vk_festivals)} festivals from VK API")
@@ -533,35 +421,34 @@ def build_calendar():
         festivals = SAMPLE_FESTIVALS
         print(f"VK API returned no data, using {len(SAMPLE_FESTIVALS)} sample festivals")
 
-    # Ensure public directory exists BEFORE generating files
-    Path('public').mkdir(exist_ok=True)
+    Path("public").mkdir(exist_ok=True)
 
-    html = HTML_TEMPLATE.format(
+    html = HTML_TEMPLATE.substitute(
         city=CITY,
         filter_buttons=generate_filter_buttons(festivals),
         months_content=generate_months_html(festivals),
-        update_time=datetime.now().strftime('%d %B %Y, %H:%M')
+        update_time=datetime.now().strftime("%d %B %Y, %H:%M")
     )
-    with open(HTML_OUTPUT, 'w', encoding='utf-8') as f:
+    with open(HTML_OUTPUT, "w", encoding="utf-8") as f:
         f.write(html)
-    with open(CSV_OUTPUT, 'w', newline='', encoding='utf-8') as f:
+    with open(CSV_OUTPUT, "w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
-        writer.writerow(['Название', 'Дата начала', 'Дата окончания', 'Место', 'Темы',
-                         'Описание', 'Ссылка', 'Google Calendar'])
+        writer.writerow(["Название", "Дата начала", "Дата окончания", "Место", "Темы",
+                         "Описание", "Ссылка", "Google Calendar"])
         for fest in festivals:
             writer.writerow([
-                fest.name, fest.date_start, fest.date_end or '',
-                fest.venue, ', '.join(fest.themes),
+                fest.name, fest.date_start, fest.date_end or "",
+                fest.venue, ", ".join(fest.themes),
                 fest.description, fest.source_url,
                 generate_google_calendar_link(fest)
             ])
-    with open(DATA_FILE, 'w', encoding='utf-8') as f:
+    with open(DATA_FILE, "w", encoding="utf-8") as f:
         json.dump([f.to_dict() for f in festivals], f, ensure_ascii=False, indent=2)
-    print('Calendar built successfully!')
-    print(f'   HTML: {HTML_OUTPUT}')
-    print(f'   CSV: {CSV_OUTPUT}')
-    print(f'   JSON: {DATA_FILE}')
-    print(f'   Total festivals: {len(festivals)}')
+    print("Calendar built successfully!")
+    print(f"   HTML: {HTML_OUTPUT}")
+    print(f"   CSV: {CSV_OUTPUT}")
+    print(f"   JSON: {DATA_FILE}")
+    print(f"   Total festivals: {len(festivals)}")
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     build_calendar()
