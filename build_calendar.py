@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Generated: 2026-06-30 22:45:02 MSK
+# Generated: 2026-06-30 23:02:00 MSK
 # Festival Calendar Builder for St. Petersburg
 # Automated scraper + HTML generator for geek/anime/roleplay festivals
 
@@ -209,35 +209,87 @@ def parse_vk_group(token, group_info):
         ))
     return festivals
 
+
 def normalize_event_name(name):
     """Extract core event name for deduplication."""
     cleaned = re.sub(r"\[club\d+\|[^\]]+\]", "", name)
     cleaned = re.sub(r"[^\w\s]", " ", cleaned)
     cleaned = re.sub(r"\s+", " ", cleaned).strip().lower()
-    event_patterns = ["epic con", "anicon", "dicefest", "данжн", "toshocon", "japan fest", "япония фест"]
-    for pattern in event_patterns:
-        if pattern in cleaned:
-            return pattern
+
+    # Known event patterns - exact matches for core names
+    event_patterns = [
+        (r"\bepic\s*con\b", "epiccon"),
+        (r"\banicon\b", "anicon"),
+        (r"\bdice\s*fest\b", "dicefest"),
+        (r"\bданжн\s*фест\b", "danjnfest"),
+        (r"\btoshocon\b", "toshocon"),
+        (r"\bjapan\s*fest\b", "japanfest"),
+        (r"\bяпония\.?\s*фест\b", "japanfest"),
+        (r"\bролевой\s*маяк\b", "rolemayak"),
+    ]
+
+    for pattern, core_name in event_patterns:
+        if re.search(pattern, cleaned):
+            return core_name
+
+    # Fallback: extract significant words
     words = cleaned.split()
     significant = [w for w in words if len(w) > 3 and w not in
-                   ["фестиваль", "событие", "мероприятие", "санкт", "петербург", "проведет", "пройдет"]]
+                   ["фестиваль", "событие", "мероприятие", "санкт", "петербург", "проведет", "пройдет", "года", "июля", "августа", "сентября"]]
     return " ".join(significant[:3]) if significant else cleaned[:30]
 
+
+def normalize_date_for_dedup(date_start, date_end):
+    """Normalize date for deduplication: always return (start, end) where end may equal start."""
+    if date_end is None:
+        return date_start, date_start
+    return date_start, date_end
+
+
 def deduplicate_festivals(festivals):
-    """Deduplicate by normalized name + date. Keep longest description."""
+    """Deduplicate by normalized name + normalized date range. 
+    Keep the entry with:
+    - longest description
+    - explicit date_end if available
+    - explicit year if available
+    - latest post (most recent update)
+    """
     groups = {}
+
     for f in festivals:
-        key = (normalize_event_name(f.name), f.date_start, f.date_end)
+        norm_name = normalize_event_name(f.name)
+        norm_start, norm_end = normalize_date_for_dedup(f.date_start, f.date_end)
+        # Use month-level key for deduplication: same event in same month = duplicate
+        month_key = norm_start[:7]  # YYYY-MM
+        key = (norm_name, month_key)
+
         if key not in groups:
             groups[key] = []
         groups[key].append(f)
 
     result = []
     for key, group in groups.items():
-        best = max(group, key=lambda x: len(x.description))
+        # Scoring: prefer entries with more info
+        def score(f):
+            s = len(f.description)  # longer description = better
+            s += 100 if f.date_end else 0  # prefer entries with end date
+            s += 100 if f.is_confirmed else 0  # prefer confirmed dates
+            return s
+
+        best = max(group, key=score)
+
+        # Merge date_end from other entries if best doesn't have it
+        if not best.date_end:
+            for other in group:
+                if other.date_end and other.date_start == best.date_start:
+                    best.date_end = other.date_end
+                    best.is_confirmed = True
+                    break
+
         result.append(best)
 
     return result
+
 
 def scrape_vk_festivals():
     token = get_vk_token()
@@ -393,6 +445,9 @@ HTML_TEMPLATE = Template("""<!DOCTYPE html>
                       border-radius: 8px; margin-bottom: 1rem; font-size: 0.9rem;
                       color: var(--text-muted); border: 1px solid var(--border); }
         .update-info .label { color: var(--accent); font-weight: 600; }
+        .dedup-info { text-align: center; padding: 0.4rem; background: rgba(76, 175, 80, 0.1);
+                      border-radius: 6px; margin-bottom: 1rem; font-size: 0.85rem;
+                      color: var(--success); border: 1px solid rgba(76, 175, 80, 0.3); }
         footer { text-align: center; padding: 2rem; color: var(--text-muted);
                  border-top: 1px solid var(--border); margin-top: 2rem; }
         @media (max-width: 768px) { .container { padding: 1rem; } h1 { font-size: 1.8rem; } }
@@ -406,6 +461,9 @@ HTML_TEMPLATE = Template("""<!DOCTYPE html>
         </header>
         <div class="update-info">
             <span class="label">Последнее обновление данных:</span> $last_update
+        </div>
+        <div class="dedup-info">
+            Найдено мероприятий: $total_events | Уникальных после фильтрации дублей: $unique_events
         </div>
         <div class="filters">
             <button class="filter-btn active" onclick="filterThemes('all')">Все</button>
@@ -530,11 +588,19 @@ def build_calendar():
         last_vk_update = "данные из кэша (VK API недоступен)"
         print(f"VK API returned no data, using {len(SAMPLE_FESTIVALS)} sample festivals")
 
+    # Count before dedup for display
+    total_raw = len(festivals)
+    festivals = deduplicate_festivals(festivals)
+    unique_count = len(festivals)
+    print(f"Deduplication: {total_raw} raw -> {unique_count} unique")
+
     Path("public").mkdir(exist_ok=True)
 
     html = HTML_TEMPLATE.substitute(
         city=CITY,
         last_update=last_vk_update,
+        total_events=total_raw,
+        unique_events=unique_count,
         filter_buttons=generate_filter_buttons(festivals),
         months_content=generate_months_html(festivals),
         update_time=datetime.now(MSK).strftime("%d %B %Y, %H:%M")
