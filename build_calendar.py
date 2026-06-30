@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Generated: 2026-06-30 23:15:00 MSK
+# Generated: 2026-06-30 23:30:00 MSK
 # Festival Calendar Builder for St. Petersburg
 # Automated scraper + HTML generator for geek/anime/roleplay festivals
 
@@ -56,14 +56,12 @@ def parse_vk_date(text):
         "июля": 7, "августа": 8, "сентября": 9, "октября": 10, "ноября": 11, "декабря": 12
     }
 
-    # Check for explicit year in text
     year_match = re.search(r"\b(20\d{2})\b", text)
     explicit_year = year_match is not None
     year = int(year_match.group(1)) if year_match else datetime.now(MSK).year
 
     text_lower = text.lower()
 
-    # Pattern 1: Range with dash/en-dash/em-dash: "11-12 июля"
     pattern_range = r"(\d{1,2})[-\u2013\u2014]\s*(\d{1,2})\s+([\u0430-\u044f]+)"
     match = re.search(pattern_range, text_lower)
     if match:
@@ -72,7 +70,6 @@ def parse_vk_date(text):
         if month:
             return f"{year:04d}-{month:02d}-{day1:02d}", f"{year:04d}-{month:02d}-{day2:02d}", True, explicit_year
 
-    # Pattern 2: Range with "и": "11 и 12 июля"
     pattern_and = r"(\d{1,2})\s+и\s+(\d{1,2})\s+([\u0430-\u044f]+)"
     match = re.search(pattern_and, text_lower)
     if match:
@@ -81,7 +78,6 @@ def parse_vk_date(text):
         if month:
             return f"{year:04d}-{month:02d}-{day1:02d}", f"{year:04d}-{month:02d}-{day2:02d}", True, explicit_year
 
-    # Pattern 3: Single date: "11 июля"
     pattern_single = r"(\d{1,2})\s+([\u0430-\u044f]+)"
     match = re.search(pattern_single, text_lower)
     if match:
@@ -100,7 +96,6 @@ def extract_venue(text):
     return "Санкт-Петербург"
 
 def extract_description(text, max_length=400):
-    """Extract first meaningful line as description."""
     lines = [line.strip() for line in text.split("\n") if line.strip()]
     if lines:
         for line in lines[1:] if len(lines) > 1 else lines:
@@ -124,6 +119,98 @@ def fetch_vk_posts(token, group_id, count=20):
     except Exception as e:
         print(f"Error fetching posts for group {group_id}: {e}")
         return []
+
+
+def normalize_event_name(name):
+    """Extract core event name for deduplication."""
+    vk_names = re.findall(r"\[club\d+\|([^\]]+)\]", name)
+
+    for vk_name in vk_names:
+        clean_vk = re.sub(r"[^\w\s]", " ", vk_name)
+        clean_vk = re.sub(r"\s+", " ", clean_vk).strip().lower()
+
+        if re.search(r"\bepic\s*con\b", clean_vk):
+            return "epiccon"
+        if re.search(r"\banicon\b", clean_vk):
+            return "anicon"
+        if re.search(r"\bdice\s*fest\b", clean_vk):
+            return "dicefest"
+        if re.search(r"\btoshocon\b", clean_vk):
+            return "toshocon"
+        if re.search(r"\bjapan\s*fest\b", clean_vk):
+            return "japanfest"
+
+    cleaned = re.sub(r"\[club\d+\|([^\]]+)\]", r"\1", name)
+    cleaned = re.sub(r"[^\w\s]", " ", cleaned)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip().lower()
+
+    event_patterns = [
+        (r"\bepic\s*con\b", "epiccon"),
+        (r"\banicon\b", "anicon"),
+        (r"\bdice\s*fest\b", "dicefest"),
+        (r"\bданжн\s*фест\b", "danjnfest"),
+        (r"\btoshocon\b", "toshocon"),
+        (r"\bjapan\s*fest\b", "japanfest"),
+        (r"\bяпония\.?\s*фест\b", "japanfest"),
+        (r"\bролевой\s*маяк\b", "rolemayak"),
+    ]
+
+    for pattern, core_name in event_patterns:
+        if re.search(pattern, cleaned):
+            return core_name
+
+    words = cleaned.split()
+    significant = [w for w in words if len(w) > 3 and w not in
+                   ["фестиваль", "событие", "мероприятие", "санкт", "петербург", 
+                    "проведет", "пройдет", "года", "июля", "августа", "сентября",
+                    "билеты", "купить", "цены", "скидка", "акция"]]
+    return " ".join(significant[:3]) if significant else cleaned[:30]
+
+
+def normalize_date_for_dedup(date_start, date_end):
+    if date_end is None:
+        return date_start, date_start
+    return date_start, date_end
+
+
+def deduplicate_festivals(festivals):
+    """Deduplicate by normalized name + month. Keep best entry per group."""
+    groups = {}
+
+    for f in festivals:
+        norm_name = normalize_event_name(f.name)
+        norm_start, _ = normalize_date_for_dedup(f.date_start, f.date_end)
+        month_key = norm_start[:7]
+        key = (norm_name, month_key)
+
+        if key not in groups:
+            groups[key] = []
+        groups[key].append(f)
+
+    result = []
+    for group in groups.values():
+        def score(f):
+            s = len(f.description)
+            s += 100 if f.date_end else 0
+            s += 100 if f.is_confirmed else 0
+            return s
+
+        best = max(group, key=score)
+
+        if not best.date_end:
+            for other in group:
+                if other.date_end and other.date_start == best.date_start:
+                    best.date_end = other.date_end
+                    best.is_confirmed = True
+                    break
+
+        result.append(best)
+
+    return result
+
+
+# Global list to collect filtered posts for debug page
+FILTERED_POSTS = []
 
 def parse_vk_group(token, group_info):
     screen_name = group_info["screen_name"]
@@ -150,35 +237,72 @@ def parse_vk_group(token, group_info):
         name = lines[0] if lines else f"Event from {screen_name}"
 
         date_start, date_end, is_confirmed, explicit_year = parse_vk_date(text)
+
+        post_id = post.get("id")
+        source_url = f"https://vk.com/{screen_name}?w=wall-{group_id}_{post_id}"
+
+        # No date found - skip
         if not date_start:
+            FILTERED_POSTS.append({
+                "name": name,
+                "url": source_url,
+                "reason": "Не найдена дата в тексте поста",
+                "group": screen_name,
+            })
             continue
 
         try:
             event_date = datetime.strptime(date_start, "%Y-%m-%d").date()
         except:
+            FILTERED_POSTS.append({
+                "name": name,
+                "url": source_url,
+                "reason": "Ошибка парсинга даты",
+                "group": screen_name,
+            })
             continue
 
-        # CHECK 1: Skip past events
+        # CHECK 1: Past events
         if event_date < today:
-            print(f"  Skipping past event: {name} ({date_start})")
+            FILTERED_POSTS.append({
+                "name": name,
+                "url": source_url,
+                "reason": f"Прошедшее событие ({date_start})",
+                "group": screen_name,
+            })
             continue
 
-        # CHECK 2: Skip events too far in the future
+        # CHECK 2: Too far in future
         if event_date > max_future:
-            print(f"  Skipping too-far-future event: {name} ({date_start})")
+            FILTERED_POSTS.append({
+                "name": name,
+                "url": source_url,
+                "reason": f"Слишком далеко в будущем ({date_start})",
+                "group": screen_name,
+            })
             continue
 
         # CHECK 3: Old post without explicit year
         if post_age_days > 90 and not explicit_year:
-            print(f"  Skipping old post without explicit year: {name}")
+            FILTERED_POSTS.append({
+                "name": name,
+                "url": source_url,
+                "reason": f"Старый пост ({post_age_days} дн.) без явного года",
+                "group": screen_name,
+            })
             continue
 
         # CHECK 4: Suspicious cross-year post
         if not explicit_year and post_date.year < today.year and event_date.year == today.year:
-            print(f"  Skipping suspicious cross-year post: {name}")
+            FILTERED_POSTS.append({
+                "name": name,
+                "url": source_url,
+                "reason": "Подозрительный пост через годовую границу",
+                "group": screen_name,
+            })
             continue
 
-        # CHECK 5: Skip promotional posts
+        # CHECK 5: Promotional posts
         promo_keywords = [
             "повышение цен", "подорожание", "скидка", "акция", "распродажа",
             "купить билет", "заявки", "прием заявок", "конкурс", "отбор",
@@ -186,20 +310,20 @@ def parse_vk_group(token, group_info):
             "представляем партнера", "официальный партнер", "дорогие друзья"
         ]
         is_promo = any(kw in text.lower() for kw in promo_keywords)
-
-        # Count how many dates are in the text - promo posts usually mention only one date
         date_mentions = len(re.findall(r"\d{1,2}\s+[\u0430-\u044f]+", text.lower()))
 
-        # Skip if clearly promotional: has promo keywords AND is short OR has only one date mention
         if is_promo and (len(text) < 200 or date_mentions < 2):
-            print(f"  Skipping promotional post: {name[:60]}...")
+            matched_kw = [kw for kw in promo_keywords if kw in text.lower()]
+            FILTERED_POSTS.append({
+                "name": name,
+                "url": source_url,
+                "reason": f"Промо-пост (ключевые слова: {', '.join(matched_kw)})",
+                "group": screen_name,
+            })
             continue
 
         venue = extract_venue(text)
         description = extract_description(text)
-        post_id = post.get("id")
-        source_url = f"https://vk.com/{screen_name}?w=wall-{group_id}_{post_id}"
-
         is_confirmed = explicit_year or (date_end is not None)
 
         festivals.append(Festival(
@@ -210,120 +334,10 @@ def parse_vk_group(token, group_info):
     return festivals
 
 
-def normalize_event_name(name):
-    """Extract core event name for deduplication.
-
-    Strategy:
-    1. First try to extract event name from VK [clubID|Name] links
-    2. Then fall back to regex patterns in the full text
-    3. Finally use significant words
-    """
-    # Step 1: Extract names from VK club links [clubID|Name]
-    vk_names = re.findall(r"\[club\d+\|([^\]]+)\]", name)
-
-    # Clean up extracted names and look for known events
-    for vk_name in vk_names:
-        clean_vk = re.sub(r"[^\w\s]", " ", vk_name)
-        clean_vk = re.sub(r"\s+", " ", clean_vk).strip().lower()
-
-        # Check for known patterns in VK link names
-        if re.search(r"\bepic\s*con\b", clean_vk):
-            return "epiccon"
-        if re.search(r"\banicon\b", clean_vk):
-            return "anicon"
-        if re.search(r"\bdice\s*fest\b", clean_vk):
-            return "dicefest"
-        if re.search(r"\btoshocon\b", clean_vk):
-            return "toshocon"
-        if re.search(r"\bjapan\s*fest\b", clean_vk):
-            return "japanfest"
-
-    # Step 2: Clean the full text (replace VK links with their display text)
-    cleaned = re.sub(r"\[club\d+\|([^\]]+)\]", r"\1", name)
-    cleaned = re.sub(r"[^\w\s]", " ", cleaned)
-    cleaned = re.sub(r"\s+", " ", cleaned).strip().lower()
-
-    # Step 3: Known event patterns in full cleaned text
-    event_patterns = [
-        (r"\bepic\s*con\b", "epiccon"),
-        (r"\banicon\b", "anicon"),
-        (r"\bdice\s*fest\b", "dicefest"),
-        (r"\bданжн\s*фест\b", "danjnfest"),
-        (r"\btoshocon\b", "toshocon"),
-        (r"\bjapan\s*fest\b", "japanfest"),
-        (r"\bяпония\.?\s*фест\b", "japanfest"),
-        (r"\bролевой\s*маяк\b", "rolemayak"),
-    ]
-
-    for pattern, core_name in event_patterns:
-        if re.search(pattern, cleaned):
-            return core_name
-
-    # Step 4: Fallback - extract significant words
-    words = cleaned.split()
-    significant = [w for w in words if len(w) > 3 and w not in
-                   ["фестиваль", "событие", "мероприятие", "санкт", "петербург", 
-                    "проведет", "пройдет", "года", "июля", "августа", "сентября",
-                    "билеты", "купить", "цены", "скидка", "акция"]]
-    return " ".join(significant[:3]) if significant else cleaned[:30]
-
-
-def normalize_date_for_dedup(date_start, date_end):
-    """Normalize date for deduplication: always return (start, end) where end may equal start."""
-    if date_end is None:
-        return date_start, date_start
-    return date_start, date_end
-
-
-def deduplicate_festivals(festivals):
-    """Deduplicate by normalized name + normalized date range. 
-    Keep the entry with:
-    - longest description
-    - explicit date_end if available
-    - explicit year if available
-    - latest post (most recent update)
-    """
-    groups = {}
-
-    for f in festivals:
-        norm_name = normalize_event_name(f.name)
-        norm_start, norm_end = normalize_date_for_dedup(f.date_start, f.date_end)
-        # Use month-level key for deduplication: same event in same month = duplicate
-        month_key = norm_start[:7]  # YYYY-MM
-        key = (norm_name, month_key)
-
-        if key not in groups:
-            groups[key] = []
-        groups[key].append(f)
-
-    result = []
-    for key, group in groups.items():
-        # Scoring: prefer entries with more info
-        def score(f):
-            s = len(f.description)  # longer description = better
-            s += 100 if f.date_end else 0  # prefer entries with end date
-            s += 100 if f.is_confirmed else 0  # prefer confirmed dates
-            return s
-
-        best = max(group, key=score)
-
-        # Merge date_end from other entries if best doesn't have it
-        if not best.date_end:
-            for other in group:
-                if other.date_end and other.date_start == best.date_start:
-                    best.date_end = other.date_end
-                    best.is_confirmed = True
-                    break
-
-        result.append(best)
-
-    return result
-
-
 def scrape_vk_festivals():
     token = get_vk_token()
     if not token:
-        return [], "VK API недоступен"
+        return [], "VK API недоступен", 0
     all_festivals = []
     for group_info in VK_GROUPS:
         print(f"Parsing VK group: {group_info['screen_name']}")
@@ -331,14 +345,16 @@ def scrape_vk_festivals():
         all_festivals.extend(festivals)
         print(f"  Found {len(festivals)} events")
 
+    total_raw = len(all_festivals)
     unique = deduplicate_festivals(all_festivals)
-    print(f"Total after deduplication: {len(unique)} (was {len(all_festivals)})")
-    return unique, datetime.now(MSK).strftime("%d %B %Y, %H:%M")
+    print(f"Total after deduplication: {len(unique)} (was {total_raw})")
+    return unique, datetime.now(MSK).strftime("%d %B %Y, %H:%M"), total_raw
 
 CITY = "Санкт-Петербург"
 DATA_FILE = "festivals_data.json"
 HTML_OUTPUT = "public/index.html"
 CSV_OUTPUT = "public/festivals.csv"
+DEBUG_OUTPUT = "public/debug.html"
 
 class Festival:
     def __init__(self, name, date_start, date_end, venue, city,
@@ -479,6 +495,7 @@ HTML_TEMPLATE = Template("""<!DOCTYPE html>
                       color: var(--success); border: 1px solid rgba(76, 175, 80, 0.3); }
         footer { text-align: center; padding: 2rem; color: var(--text-muted);
                  border-top: 1px solid var(--border); margin-top: 2rem; }
+        .debug-link { color: var(--accent); text-decoration: underline; }
         @media (max-width: 768px) { .container { padding: 1rem; } h1 { font-size: 1.8rem; } }
     </style>
 </head>
@@ -501,6 +518,7 @@ HTML_TEMPLATE = Template("""<!DOCTYPE html>
         <div class="months-grid">$months_content</div>
         <footer>
             <p>Страница сгенерирована: $update_time</p>
+            <p><a href="debug.html" class="debug-link">Отладка: отфильтрованные посты</a></p>
             <p>Источники: Epic Con, Ролевой Маяк, AnimeScene, VK Fest</p>
         </footer>
     </div>
@@ -518,6 +536,83 @@ HTML_TEMPLATE = Template("""<!DOCTYPE html>
             });
         }
     </script>
+</body>
+</html>""")
+
+DEBUG_TEMPLATE = Template("""<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Отладка - Отфильтрованные посты</title>
+    <style>
+        :root { --bg: #0f0f23; --surface: #1a1a2e; --surface-light: #16213e;
+                --text: #e0e0e0; --text-muted: #888; --accent: #e94560;
+                --accent-secondary: #0f3460; --border: #2a2a4a;
+                --success: #4caf50; --warning: #ff9800; --danger: #f44336; }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Segoe UI', system-ui, sans-serif;
+               background: var(--bg); color: var(--text); line-height: 1.6; }
+        .container { max-width: 1200px; margin: 0 auto; padding: 2rem; }
+        header { text-align: center; padding: 2rem 0;
+                 border-bottom: 2px solid var(--warning); margin-bottom: 2rem; }
+        h1 { font-size: 2rem; color: var(--warning); }
+        .subtitle { color: var(--text-muted); }
+        .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+                 gap: 1rem; margin-bottom: 2rem; }
+        .stat-card { background: var(--surface); padding: 1rem; border-radius: 12px;
+                     border: 1px solid var(--border); text-align: center; }
+        .stat-value { font-size: 2rem; font-weight: 700; color: var(--accent); }
+        .stat-label { color: var(--text-muted); font-size: 0.9rem; }
+        .back-link { display: inline-block; margin-bottom: 1rem; color: var(--accent);
+                     text-decoration: none; }
+        .back-link:hover { text-decoration: underline; }
+        .filter-section { background: var(--surface); border-radius: 12px;
+                          padding: 1rem; margin-bottom: 1rem; border: 1px solid var(--border); }
+        .filter-title { color: var(--warning); font-size: 1.1rem; margin-bottom: 0.5rem; }
+        .filter-count { color: var(--text-muted); font-size: 0.85rem; }
+        .post-row { background: var(--surface-light); border-radius: 8px;
+                    padding: 0.75rem 1rem; margin-bottom: 0.5rem;
+                    border-left: 3px solid var(--danger); }
+        .post-name { font-weight: 500; color: #fff; word-break: break-word; }
+        .post-meta { color: var(--text-muted); font-size: 0.85rem; margin-top: 0.25rem; }
+        .post-reason { color: var(--warning); font-size: 0.85rem; margin-top: 0.25rem; }
+        .post-link { color: var(--accent); text-decoration: none; }
+        .post-link:hover { text-decoration: underline; }
+        footer { text-align: center; padding: 2rem; color: var(--text-muted);
+                 border-top: 1px solid var(--border); margin-top: 2rem; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Отладка парсера</h1>
+            <p class="subtitle">Отфильтрованные посты VK — причины отсечения</p>
+        </header>
+        <a href="index.html" class="back-link">&larr; Назад к календарю</a>
+        <div class="stats">
+            <div class="stat-card">
+                <div class="stat-value">$total_parsed</div>
+                <div class="stat-label">Всего постов обработано</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value">$total_kept</div>
+                <div class="stat-label">Постов прошло фильтр</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value">$total_filtered</div>
+                <div class="stat-label">Отфильтровано</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value">$unique_events</div>
+                <div class="stat-label">Уникальных событий</div>
+            </div>
+        </div>
+        $filter_sections
+        <footer>
+            <p>Сгенерировано: $update_time</p>
+        </footer>
+    </div>
 </body>
 </html>""")
 
@@ -607,24 +702,72 @@ def generate_months_html(festivals):
         """)
     return "\n".join(sections)
 
+
+def generate_debug_html(filtered_posts, total_parsed, total_kept, unique_count):
+    """Generate debug page with filtered posts grouped by reason."""
+    from collections import Counter
+
+    # Group by reason
+    by_reason = {}
+    for post in filtered_posts:
+        reason = post["reason"]
+        if reason not in by_reason:
+            by_reason[reason] = []
+        by_reason[reason].append(post)
+
+    # Sort by count descending
+    sorted_reasons = sorted(by_reason.items(), key=lambda x: -len(x[1]))
+
+    sections = []
+    for reason, posts in sorted_reasons:
+        rows = []
+        for post in posts:
+            name_short = post["name"][:120] + "..." if len(post["name"]) > 120 else post["name"]
+            rows.append(f"""
+                <div class="post-row">
+                    <div class="post-name">{name_short}</div>
+                    <div class="post-meta">Группа: {post["group"]} | <a href="{post["url"]}" class="post-link" target="_blank">Открыть в VK</a></div>
+                </div>
+            """)
+
+        sections.append(f"""
+            <div class="filter-section">
+                <div class="filter-title">{reason}</div>
+                <div class="filter-count">Отфильтровано: {len(posts)} постов</div>
+                {''.join(rows)}
+            </div>
+        """)
+
+    return DEBUG_TEMPLATE.substitute(
+        total_parsed=total_parsed,
+        total_kept=total_kept,
+        total_filtered=len(filtered_posts),
+        unique_events=unique_count,
+        filter_sections="\n".join(sections),
+        update_time=datetime.now(MSK).strftime("%d %B %Y, %H:%M")
+    )
+
+
 def build_calendar():
-    vk_festivals, last_vk_update = scrape_vk_festivals()
+    global FILTERED_POSTS
+    FILTERED_POSTS = []  # Reset for fresh run
+
+    vk_festivals, last_vk_update, total_raw = scrape_vk_festivals()
     if vk_festivals:
         festivals = vk_festivals
         print(f"Using {len(vk_festivals)} festivals from VK API")
     else:
         festivals = SAMPLE_FESTIVALS
         last_vk_update = "данные из кэша (VK API недоступен)"
+        total_raw = len(SAMPLE_FESTIVALS)
         print(f"VK API returned no data, using {len(SAMPLE_FESTIVALS)} sample festivals")
 
-    # Count before dedup for display
-    total_raw = len(festivals)
-    festivals = deduplicate_festivals(festivals)
     unique_count = len(festivals)
     print(f"Deduplication: {total_raw} raw -> {unique_count} unique")
 
     Path("public").mkdir(exist_ok=True)
 
+    # Main page
     html = HTML_TEMPLATE.substitute(
         city=CITY,
         last_update=last_vk_update,
@@ -636,6 +779,8 @@ def build_calendar():
     )
     with open(HTML_OUTPUT, "w", encoding="utf-8") as f:
         f.write(html)
+
+    # CSV
     with open(CSV_OUTPUT, "w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
         writer.writerow(["Название", "Дата начала", "Дата окончания", "Место", "Темы",
@@ -647,13 +792,24 @@ def build_calendar():
                 fest.description, fest.source_url,
                 generate_google_calendar_link(fest)
             ])
+
+    # JSON
     with open(DATA_FILE, "w", encoding="utf-8") as f:
         json.dump([f.to_dict() for f in festivals], f, ensure_ascii=False, indent=2)
+
+    # Debug page
+    total_parsed = total_raw + len(FILTERED_POSTS)
+    debug_html = generate_debug_html(FILTERED_POSTS, total_parsed, total_raw, unique_count)
+    with open(DEBUG_OUTPUT, "w", encoding="utf-8") as f:
+        f.write(debug_html)
+
     print("Calendar built successfully!")
     print(f"   HTML: {HTML_OUTPUT}")
     print(f"   CSV: {CSV_OUTPUT}")
     print(f"   JSON: {DATA_FILE}")
+    print(f"   DEBUG: {DEBUG_OUTPUT}")
     print(f"   Total festivals: {len(festivals)}")
+    print(f"   Filtered posts: {len(FILTERED_POSTS)}")
 
 if __name__ == "__main__":
     build_calendar()
