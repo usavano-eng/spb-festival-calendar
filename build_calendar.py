@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""
-Festival Calendar Builder for St. Petersburg
-"""
+# Generated: 2026-07-01 03:06:59
+# Festival Calendar Builder for St. Petersburg
+# Automated scraper + HTML generator for geek/anime/roleplay festivals
 
 import json
 import csv
@@ -106,23 +106,56 @@ def parse_vk_group(token, group_info):
     posts = fetch_vk_posts(token, group_id)
     festivals = []
     today = datetime.now().date()
+    max_future = today + timedelta(days=550)  # ~1.5 years ahead
+
     for post in posts:
         text = post.get("text", "")
         if not text:
             continue
+
+        # Get post publication date (Unix timestamp from VK API)
+        post_date_ts = post.get("date")
+        post_date = datetime.fromtimestamp(post_date_ts).date() if post_date_ts else today
+        post_age_days = (today - post_date).days
+
         lines = [l.strip() for l in text.split("\n") if l.strip()]
         name = lines[0] if lines else f"Event from {screen_name}"
         name = name[:80] + "..." if len(name) > 80 else name
+
+        # Check if year is explicitly mentioned in the text
+        year_match = re.search(r"\b(20\d{2})\b", text)
+        explicit_year = year_match is not None
+
         date_start, date_end, is_confirmed = parse_vk_date(text)
         if not date_start:
             continue
+
         try:
             event_date = datetime.strptime(date_start, "%Y-%m-%d").date()
-            if event_date < today:
-                print(f"  Skipping past event: {name} ({date_start})")
-                continue
         except:
             continue
+
+        # CHECK 1: Skip past events
+        if event_date < today:
+            print(f"  Skipping past event: {name} ({date_start})")
+            continue
+
+        # CHECK 2: Skip events too far in the future (> 1.5 years)
+        if event_date > max_future:
+            print(f"  Skipping too-far-future event: {name} ({date_start})")
+            continue
+
+        # CHECK 3: If post is older than 90 days AND no explicit year in text,
+        # likely a repost of old event with implicit year assumption
+        if post_age_days > 90 and not explicit_year:
+            print(f"  Skipping old post without explicit year: {name} (post from {post_date}, event {date_start})")
+            continue
+
+        # CHECK 4: If year not explicit and post is from previous years but event claims this year
+        if not explicit_year and post_date.year < today.year and event_date.year == today.year:
+            print(f"  Skipping suspicious cross-year post: {name} (post {post_date.year}, event {date_start})")
+            continue
+
         venue = extract_venue(text)
         description = extract_description(text)
         post_id = post.get("id")
