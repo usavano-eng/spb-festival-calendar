@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Generated: 2026-06-30 23:02:00 MSK
+# Generated: 2026-06-30 23:15:00 MSK
 # Festival Calendar Builder for St. Petersburg
 # Automated scraper + HTML generator for geek/anime/roleplay festivals
 
@@ -211,12 +211,39 @@ def parse_vk_group(token, group_info):
 
 
 def normalize_event_name(name):
-    """Extract core event name for deduplication."""
-    cleaned = re.sub(r"\[club\d+\|[^\]]+\]", "", name)
+    """Extract core event name for deduplication.
+
+    Strategy:
+    1. First try to extract event name from VK [clubID|Name] links
+    2. Then fall back to regex patterns in the full text
+    3. Finally use significant words
+    """
+    # Step 1: Extract names from VK club links [clubID|Name]
+    vk_names = re.findall(r"\[club\d+\|([^\]]+)\]", name)
+
+    # Clean up extracted names and look for known events
+    for vk_name in vk_names:
+        clean_vk = re.sub(r"[^\w\s]", " ", vk_name)
+        clean_vk = re.sub(r"\s+", " ", clean_vk).strip().lower()
+
+        # Check for known patterns in VK link names
+        if re.search(r"\bepic\s*con\b", clean_vk):
+            return "epiccon"
+        if re.search(r"\banicon\b", clean_vk):
+            return "anicon"
+        if re.search(r"\bdice\s*fest\b", clean_vk):
+            return "dicefest"
+        if re.search(r"\btoshocon\b", clean_vk):
+            return "toshocon"
+        if re.search(r"\bjapan\s*fest\b", clean_vk):
+            return "japanfest"
+
+    # Step 2: Clean the full text (replace VK links with their display text)
+    cleaned = re.sub(r"\[club\d+\|([^\]]+)\]", r"\1", name)
     cleaned = re.sub(r"[^\w\s]", " ", cleaned)
     cleaned = re.sub(r"\s+", " ", cleaned).strip().lower()
 
-    # Known event patterns - exact matches for core names
+    # Step 3: Known event patterns in full cleaned text
     event_patterns = [
         (r"\bepic\s*con\b", "epiccon"),
         (r"\banicon\b", "anicon"),
@@ -232,10 +259,12 @@ def normalize_event_name(name):
         if re.search(pattern, cleaned):
             return core_name
 
-    # Fallback: extract significant words
+    # Step 4: Fallback - extract significant words
     words = cleaned.split()
     significant = [w for w in words if len(w) > 3 and w not in
-                   ["фестиваль", "событие", "мероприятие", "санкт", "петербург", "проведет", "пройдет", "года", "июля", "августа", "сентября"]]
+                   ["фестиваль", "событие", "мероприятие", "санкт", "петербург", 
+                    "проведет", "пройдет", "года", "июля", "августа", "сентября",
+                    "билеты", "купить", "цены", "скидка", "акция"]]
     return " ".join(significant[:3]) if significant else cleaned[:30]
 
 
