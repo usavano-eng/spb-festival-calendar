@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Generated: 2026-07-01 03:06:59
+# Generated: 2026-07-01 03:22:18
 # Festival Calendar Builder for St. Petersburg
 # Automated scraper + HTML generator for geek/anime/roleplay festivals
 
@@ -47,39 +47,66 @@ def resolve_screen_name(token, screen_name):
         return None
 
 def parse_vk_date(text):
+    """Extract date range from VK post text. Returns (start, end, is_confirmed, has_explicit_year)."""
     months_ru = {
         "января": 1, "февраля": 2, "марта": 3, "апреля": 4, "мая": 5, "июня": 6,
         "июля": 7, "августа": 8, "сентября": 9, "октября": 10, "ноября": 11, "декабря": 12
     }
+
+    # Check for explicit year in text
     year_match = re.search(r"\b(20\d{2})\b", text)
-    year = int(year_match.group(1)) if year_match else 2026
-    pattern = r"(\d{1,2})[-\u2013\u2014]\s*(\d{1,2})\s+([\u0430-\u044f]+)"
-    match = re.search(pattern, text.lower())
+    explicit_year = year_match is not None
+    year = int(year_match.group(1)) if year_match else datetime.now().year
+
+    text_lower = text.lower()
+
+    # Pattern 1: Range with dash/en-dash/em-dash: "11-12 июля", "11–12 июля", "11—12 июля"
+    pattern_range = r"(\d{1,2})[-\u2013\u2014]\s*(\d{1,2})\s+([\u0430-\u044f]+)"
+    match = re.search(pattern_range, text_lower)
     if match:
         day1, day2, month_name = int(match.group(1)), int(match.group(2)), match.group(3)
         month = months_ru.get(month_name)
         if month:
-            return f"{year:04d}-{month:02d}-{day1:02d}", f"{year:04d}-{month:02d}-{day2:02d}", True
+            return f"{year:04d}-{month:02d}-{day1:02d}", f"{year:04d}-{month:02d}-{day2:02d}", True, explicit_year
+
+    # Pattern 2: Range with "и": "11 и 12 июля", "11 и 12 июля"
+    pattern_and = r"(\d{1,2})\s+и\s+(\d{1,2})\s+([\u0430-\u044f]+)"
+    match = re.search(pattern_and, text_lower)
+    if match:
+        day1, day2, month_name = int(match.group(1)), int(match.group(2)), match.group(3)
+        month = months_ru.get(month_name)
+        if month:
+            return f"{year:04d}-{month:02d}-{day1:02d}", f"{year:04d}-{month:02d}-{day2:02d}", True, explicit_year
+
+    # Pattern 3: Single date: "11 июля"
     pattern_single = r"(\d{1,2})\s+([\u0430-\u044f]+)"
-    match = re.search(pattern_single, text.lower())
+    match = re.search(pattern_single, text_lower)
     if match:
         day, month_name = int(match.group(1)), match.group(2)
         month = months_ru.get(month_name)
         if month:
-            return f"{year:04d}-{month:02d}-{day:02d}", None, True
-    return None, None, False
+            return f"{year:04d}-{month:02d}-{day:02d}", None, True, explicit_year
+
+    return None, None, False, False
 
 def extract_venue(text):
-    venues = ["DAA EXPO", "СКК", "Экспофорум", "Ленэкспо", "Конгресс-холл"]
+    venues = ["DAA EXPO", "СКК", "Экспофорум", "Ленэкспо", "Конгресс-холл", "Севкабель Порт"]
     for venue in venues:
         if venue.lower() in text.lower():
             return venue
     return "Санкт-Петербург"
 
-def extract_description(text, max_length=200):
+def extract_description(text, max_length=400):
+    """Extract first meaningful line as description."""
     lines = [line.strip() for line in text.split("\n") if line.strip()]
     if lines:
-        desc = lines[0]
+        # Skip the title line if it looks like a date announcement
+        for line in lines[1:] if len(lines) > 1 else lines:
+            if len(line) > 20:
+                desc = line
+                break
+        else:
+            desc = lines[0]
         return desc[:max_length] + "..." if len(desc) > max_length else desc
     return ""
 
@@ -120,13 +147,9 @@ def parse_vk_group(token, group_info):
 
         lines = [l.strip() for l in text.split("\n") if l.strip()]
         name = lines[0] if lines else f"Event from {screen_name}"
-        name = name[:80] + "..." if len(name) > 80 else name
+        # Do NOT truncate name - show full title
 
-        # Check if year is explicitly mentioned in the text
-        year_match = re.search(r"\b(20\d{2})\b", text)
-        explicit_year = year_match is not None
-
-        date_start, date_end, is_confirmed = parse_vk_date(text)
+        date_start, date_end, is_confirmed, explicit_year = parse_vk_date(text)
         if not date_start:
             continue
 
@@ -156,10 +179,25 @@ def parse_vk_group(token, group_info):
             print(f"  Skipping suspicious cross-year post: {name} (post {post_date.year}, event {date_start})")
             continue
 
+        # CHECK 5: Skip price/announcement posts that don't look like event dates
+        # If the only date found is "1 июля" in a text about price increases, it's not the event date
+        price_keywords = ["повышение цен", "подорожание", "скидка", "акция", "распродажа", "купить билет"]
+        if any(kw in text.lower() for kw in price_keywords) and not explicit_year:
+            # Be more strict: if post mentions price changes and no explicit year, skip unless
+            # the date range is clearly an event (2+ days)
+            if not date_end:
+                print(f"  Skipping price announcement without event range: {name}")
+                continue
+
         venue = extract_venue(text)
         description = extract_description(text)
         post_id = post.get("id")
         source_url = f"https://vk.com/{screen_name}?w=wall-{group_id}_{post_id}"
+
+        # is_confirmed: True only if explicit year found OR date range (2+ days)
+        # Single-day dates without explicit year are marked as tentative
+        is_confirmed = explicit_year or (date_end is not None)
+
         festivals.append(Festival(
             name=name, date_start=date_start, date_end=date_end, venue=venue,
             city=CITY, themes=default_themes.copy(), description=description,
@@ -172,6 +210,7 @@ def scrape_vk_festivals():
     if not token:
         return []
     all_festivals = []
+    last_vk_update = None
     for group_info in VK_GROUPS:
         print(f"Parsing VK group: {group_info['screen_name']}")
         festivals = parse_vk_group(token, group_info)
@@ -185,7 +224,7 @@ def scrape_vk_festivals():
             seen.add(key)
             unique.append(f)
     print(f"Total unique VK festivals: {len(unique)}")
-    return unique
+    return unique, datetime.now().strftime("%d %B %Y, %H:%M")
 
 CITY = "Санкт-Петербург"
 DATA_FILE = "festivals_data.json"
@@ -222,7 +261,7 @@ class Festival:
         return cls(**d)
 
 SAMPLE_FESTIVALS = [
-    Festival(name="Epic Con", date_start="2026-07-11", date_end="2026-07-12", venue="DAA EXPO",
+    Festival(name="Epic Con", date_start="2026-07-11", date_end="2026-07-12", venue="Севкабель Порт",
              city="Санкт-Петербург", themes=["фантастика", "комиксы", "косплей", "сериалы", "компьютерные игры"],
              description="Крупнейший фестиваль поп-культуры. Конкурс косплея, выставочные стенды, Аллея Авторов, настольные и консольные игры, квесты.",
              source_url="https://epiccon.ru/", ticket_url="https://epiccon.ru/", is_confirmed=True),
@@ -302,12 +341,13 @@ HTML_TEMPLATE = Template("""<!DOCTYPE html>
         .festival-card.tentative { border-left-color: var(--warning); opacity: 0.85; }
         .festival-header { display: flex; justify-content: space-between;
                           align-items: flex-start; flex-wrap: wrap; gap: 0.5rem; }
-        .festival-name { font-size: 1.2rem; font-weight: 600; color: #fff; }
+        .festival-name { font-size: 1.2rem; font-weight: 600; color: #fff; word-break: break-word; }
         .festival-date { background: var(--accent-secondary); padding: 0.25rem 0.75rem;
-                        border-radius: 20px; font-size: 0.85rem; color: #fff; }
+                        border-radius: 20px; font-size: 0.85rem; color: #fff; white-space: nowrap; }
         .festival-date.tentative { background: var(--warning); color: #000; }
         .festival-venue { color: var(--text-muted); font-size: 0.9rem; margin: 0.5rem 0; }
-        .festival-description { color: var(--text-muted); font-size: 0.95rem; margin-bottom: 0.75rem; }
+        .festival-description { color: var(--text-muted); font-size: 0.95rem; margin-bottom: 0.75rem;
+                               line-height: 1.5; }
         .themes { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-bottom: 1rem; }
         .theme-tag { background: rgba(233, 69, 96, 0.15); color: var(--accent);
                     padding: 0.2rem 0.6rem; border-radius: 12px; font-size: 0.8rem; }
@@ -321,6 +361,10 @@ HTML_TEMPLATE = Template("""<!DOCTYPE html>
                        font-size: 0.75rem; margin-left: 0.5rem; }
         .status-confirmed { background: rgba(76, 175, 80, 0.2); color: var(--success); }
         .status-tentative { background: rgba(255, 152, 0, 0.2); color: var(--warning); }
+        .update-info { text-align: center; padding: 0.5rem; background: var(--surface-light);
+                      border-radius: 8px; margin-bottom: 1rem; font-size: 0.9rem;
+                      color: var(--text-muted); border: 1px solid var(--border); }
+        .update-info .label { color: var(--accent); font-weight: 600; }
         footer { text-align: center; padding: 2rem; color: var(--text-muted);
                  border-top: 1px solid var(--border); margin-top: 2rem; }
         @media (max-width: 768px) { .container { padding: 1rem; } h1 { font-size: 1.8rem; } }
@@ -332,13 +376,16 @@ HTML_TEMPLATE = Template("""<!DOCTYPE html>
             <h1>Календарь фестивалей</h1>
             <p class="subtitle">$city &bull; Гик-культура, аниме, ролевые игры, фэнтези, технологии</p>
         </header>
+        <div class="update-info">
+            <span class="label">Последнее обновление данных:</span> $last_update
+        </div>
         <div class="filters">
             <button class="filter-btn active" onclick="filterThemes('all')">Все</button>
             $filter_buttons
         </div>
         <div class="months-grid">$months_content</div>
         <footer>
-            <p>Обновлено: $update_time</p>
+            <p>Страница сгенерирована: $update_time</p>
             <p>Источники: Epic Con, Ролевой Маяк, AnimeScene, VK Fest</p>
         </footer>
     </div>
@@ -446,18 +493,20 @@ def generate_months_html(festivals):
     return "\n".join(sections)
 
 def build_calendar():
-    vk_festivals = scrape_vk_festivals()
+    vk_festivals, last_vk_update = scrape_vk_festivals()
     if vk_festivals:
         festivals = vk_festivals
         print(f"Using {len(vk_festivals)} festivals from VK API")
     else:
         festivals = SAMPLE_FESTIVALS
+        last_vk_update = "данные из кэша (VK API недоступен)"
         print(f"VK API returned no data, using {len(SAMPLE_FESTIVALS)} sample festivals")
 
     Path("public").mkdir(exist_ok=True)
 
     html = HTML_TEMPLATE.substitute(
         city=CITY,
+        last_update=last_vk_update,
         filter_buttons=generate_filter_buttons(festivals),
         months_content=generate_months_html(festivals),
         update_time=datetime.now().strftime("%d %B %Y, %H:%M")
