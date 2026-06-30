@@ -179,15 +179,26 @@ def parse_vk_group(token, group_info):
             print(f"  Skipping suspicious cross-year post: {name} (post {post_date.year}, event {date_start})")
             continue
 
-        # CHECK 5: Skip price/announcement posts that don't look like event dates
-        # If the only date found is "1 июля" in a text about price increases, it's not the event date
-        price_keywords = ["повышение цен", "подорожание", "скидка", "акция", "распродажа", "купить билет"]
-        if any(kw in text.lower() for kw in price_keywords) and not explicit_year:
-            # Be more strict: if post mentions price changes and no explicit year, skip unless
-            # the date range is clearly an event (2+ days)
-            if not date_end:
-                print(f"  Skipping price announcement without event range: {name}")
-                continue
+        # CHECK 5: Skip promotional/announcement posts that are not main event announcements
+        promo_keywords = [
+            "повышение цен", "подорожание", "скидка", "акция", "распродажа",
+            "купить билет", "заявки", "прием заявок", "конкурс", "отбор",
+            "последний день", "успейте", "поторопитесь", "один месяц",
+            "представляем партнера", "официальный партнер"
+        ]
+        # If post is clearly promotional and NOT the main event announcement, skip it
+        # Main event announcements usually have the event name + dates prominently
+        is_promo = any(kw in text.lower() for kw in promo_keywords)
+        has_event_name_in_title = any(kw in name.lower() for kw in ["фестивал", "con", "фест"])
+
+        if is_promo and not has_event_name_in_title:
+            print(f"  Skipping promotional post: {name[:60]}...")
+            continue
+
+        # Additional: skip if text is mostly about tickets/prices/contests, not the event itself
+        if is_promo and len(text) < 150:
+            print(f"  Skipping short promotional post: {name[:60]}...")
+            continue
 
         venue = extract_venue(text)
         description = extract_description(text)
@@ -205,25 +216,54 @@ def parse_vk_group(token, group_info):
         ))
     return festivals
 
+def normalize_event_name(name):
+    """Extract core event name for deduplication."""
+    # Remove VK markup [club123|Name]
+    cleaned = re.sub(r"\[club\d+\|[^\]]+\]", "", name)
+    cleaned = re.sub(r"[^\w\s]", " ", cleaned)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip().lower()
+    # Look for known event name patterns
+    event_patterns = ["epic con", "anicon", "dicefest", "данжн", "toshocon", "japan fest", "япония фест"]
+    for pattern in event_patterns:
+        if pattern in cleaned:
+            return pattern
+    # Fallback: return first 3 significant words
+    words = cleaned.split()
+    significant = [w for w in words if len(w) > 3 and w not in 
+                   ["фестиваль", "событие", "мероприятие", "санкт", "петербург", "проведет", "пройдет"]]
+    return " ".join(significant[:3]) if significant else cleaned[:30]
+
+def deduplicate_festivals(festivals):
+    """Deduplicate festivals by normalized name + date. Keep the one with longest description."""
+    groups = {}
+    for f in festivals:
+        key = (normalize_event_name(f.name), f.date_start, f.date_end)
+        if key not in groups:
+            groups[key] = []
+        groups[key].append(f)
+
+    result = []
+    for key, group in groups.items():
+        # Keep the festival with the longest description (most informative)
+        best = max(group, key=lambda x: len(x.description))
+        result.append(best)
+
+    return result
+
 def scrape_vk_festivals():
     token = get_vk_token()
     if not token:
-        return []
+        return [], "VK API недоступен"
     all_festivals = []
-    last_vk_update = None
     for group_info in VK_GROUPS:
         print(f"Parsing VK group: {group_info['screen_name']}")
         festivals = parse_vk_group(token, group_info)
         all_festivals.extend(festivals)
         print(f"  Found {len(festivals)} events")
-    seen = set()
-    unique = []
-    for f in all_festivals:
-        key = (f.name, f.date_start)
-        if key not in seen:
-            seen.add(key)
-            unique.append(f)
-    print(f"Total unique VK festivals: {len(unique)}")
+
+    # Deduplicate by normalized name + date
+    unique = deduplicate_festivals(all_festivals)
+    print(f"Total after deduplication: {len(unique)} (was {len(all_festivals)})")
     return unique, datetime.now().strftime("%d %B %Y, %H:%M")
 
 CITY = "Санкт-Петербург"
